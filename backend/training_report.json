@@ -1,0 +1,98 @@
+{
+  "timestamp": "2025-09-20T16:35:11.807769",
+  "validation_metrics": {
+    "accuracy": 0.6,
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1_score": 0.0,
+    "confusion_matrix": [
+      [
+        60,
+        0
+      ],
+      [
+        40,
+        0
+      ]
+    ],
+    "avg_prediction_time": 0.016577191352844238,
+    "throughput": 60.32384972309707
+  },
+  "scenario_results": {
+    "scenario_accuracy": 0.2,
+    "correct_predictions": 1,
+    "total_scenarios": 5,
+    "detailed_results": [
+      {
+        "scenario": "Machine en parfait \u00e9tat",
+        "expected": "normal",
+        "predicted": "normal",
+        "probability": 0.2968389385860052,
+        "failure_type": null,
+        "correct": true
+      },
+      {
+        "scenario": "D\u00e9but de surchauffe",
+        "expected": "warning",
+        "predicted": "normal",
+        "probability": 0.26524998752949436,
+        "failure_type": null,
+        "correct": false
+      },
+      {
+        "scenario": "Surchauffe critique",
+        "expected": "critical",
+        "predicted": "normal",
+        "probability": 0.19766638322517954,
+        "failure_type": null,
+        "correct": false
+      },
+      {
+        "scenario": "Usure outil avanc\u00e9e",
+        "expected": "warning",
+        "predicted": "normal",
+        "probability": 0.2905396353672609,
+        "failure_type": null,
+        "correct": false
+      },
+      {
+        "scenario": "D\u00e9faillance puissance",
+        "expected": "critical",
+        "predicted": "normal",
+        "probability": 0.19163042721160395,
+        "failure_type": null,
+        "correct": false
+      }
+    ]
+  },
+  "model_info": {
+    "anomaly_detection": {
+      "model_type": "IsolationForest",
+      "available": true,
+      "features": [
+        "air_temperature",
+        "process_temperature",
+        "rotational_speed",
+        "torque",
+        "tool_wear"
+      ]
+    },
+    "time_prediction": {
+      "model_type": "Prophet",
+      "available": false,
+      "features": []
+    },
+    "performance": {
+      "accuracy_score": 0.8,
+      "f1_score": 0.0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "total_predictions": 2105,
+      "anomalies_detected": 0,
+      "last_training": "2025-09-20"
+    },
+    "last_training": "2025-09-20"
+  },
+  "overall_score": 0.1,
+  "training_time": 0.012337684631347656
+}

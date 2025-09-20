@@ -1,0 +1,32 @@
+# Dépendances principales pour le projet IoT Hackathon
+
+# Data Science & ML
+pandas>=2.0.0
+numpy>=1.24.0
+scikit-learn>=1.3.0
+matplotlib>=3.7.0
+seaborn>=0.12.0
+plotly>=5.15.0
+jupyter>=1.0.0
+
+# Web & API
+requests>=2.31.0
+fastapi>=0.100.0
+uvicorn>=0.23.0
+streamlit>=1.25.0
+websockets>=11.0.0
+
+# IoT & Messaging
+paho-mqtt>=1.6.0
+redis>=4.6.0
+
+# Utilities
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+aiofiles>=23.0.0
+python-multipart>=0.0.6
+
+# Development
+pytest>=7.4.0
+black>=23.7.0
+flake8>=6.0.0

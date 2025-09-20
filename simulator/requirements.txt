@@ -1,0 +1,6 @@
+# Dépendances pour le simulateur IoT
+pandas>=2.0.0
+numpy>=1.24.0
+paho-mqtt>=1.6.0
+python-dotenv>=1.0.0
+asyncio

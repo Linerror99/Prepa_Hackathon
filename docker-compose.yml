@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  # MQTT Broker
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    container_name: mqtt-broker
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./config/mosquitto.conf:/mosquitto/config/mosquitto.conf
+    restart: unless-stopped
+
+  # Redis pour cache et streaming
+  redis:
+    image: redis:7-alpine
+    container_name: redis-cache
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: iot-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - MQTT_BROKER=mosquitto
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - mosquitto
+      - redis
+    volumes:
+      - ./data:/app/data
+      - ./ml:/app/ml
+    restart: unless-stopped
+
+  # Dashboard
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    container_name: iot-dashboard
+    ports:
+      - "8501:8501"
+    environment:
+      - BACKEND_URL=http://backend:8000
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - backend
+      - redis
+    restart: unless-stopped
+
+  # Simulateur IoT
+  simulator:
+    build:
+      context: ./simulator
+      dockerfile: Dockerfile
+    container_name: iot-simulator
+    environment:
+      - MQTT_BROKER=mosquitto
+    depends_on:
+      - mosquitto
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+
+volumes:
+  mqtt_data:
+  redis_data:
