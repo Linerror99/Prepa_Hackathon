@@ -28,7 +28,11 @@ from pathlib import Path
 # Import de notre nouvelle IA
 from ai_models import SmartPredictiveEngine
 # Import de la persistance SQLite
-from persist_data import init_db, save_reading, save_alert, get_recent_readings, get_active_alerts, get_machines_status, get_stats
+from persist_data import (
+    init_db, save_reading, save_alert, get_recent_readings, get_active_alerts, 
+    get_machines_status, get_stats, save_failure, get_failure_history,
+    save_machine_config, get_machine_config, get_all_machine_configs
+)
 
 # Configuration des logs
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -525,6 +529,24 @@ async def process_sensor_data(data: dict):
         # Stocker les données
         await data_manager.store_reading(reading, ai_prediction)
         
+        # Sauvegarder les pannes dans l'historique
+        if reading.status in ['warning', 'critical'] and reading.failure_type:
+            sensor_values = {
+                'air_temperature': reading.air_temperature,
+                'process_temperature': reading.process_temperature,
+                'rotational_speed': reading.rotational_speed,
+                'torque': reading.torque,
+                'tool_wear': reading.tool_wear
+            }
+            
+            save_failure(
+                machine_id=reading.machine_id,
+                failure_type=reading.failure_type,
+                failure_probability=reading.predicted_failure_probability,
+                anomaly_score=ai_prediction.get('anomaly_score', 0.0),
+                sensor_values=sensor_values
+            )
+        
         # Créer des alertes si nécessaire
         if reading.status in ['warning', 'critical']:
             severity = reading.status
@@ -599,6 +621,27 @@ async def get_fleet_summary():
 async def get_alerts():
     """Récupère toutes les alertes"""
     return data_manager.alerts
+
+@app.post("/alerts")
+async def create_alert(alert: Alert):
+    """Crée une nouvelle alerte"""
+    # Sauvegarder en base de données
+    save_alert(
+        alert_id=alert.id,
+        machine_id=alert.machine_id,
+        severity=alert.severity,
+        message=alert.message,
+        failure_type=alert.failure_type,
+        probability=alert.probability
+    )
+    
+    # Ajouter à la liste en mémoire
+    data_manager.alerts.append(alert)
+    
+    # Envoyer via WebSocket
+    await websocket_manager.broadcast(f"new_alert:{alert.dict()}")
+    
+    return {"message": "Alerte créée", "alert_id": alert.id}
 
 @app.post("/alerts/{alert_id}/acknowledge")
 async def acknowledge_alert(alert_id: str):
@@ -761,6 +804,65 @@ async def add_reading(reading: SensorReading):
         "status": "saved",
         "reading": reading.dict(),
         "prediction": prediction,
+        "timestamp": datetime.now().isoformat()
+    }
+
+# ===== NOUVEAUX ENDPOINTS - HISTORIQUE & CONFIG =====
+
+@app.get("/api/history/failures")
+async def get_failures_history(machine_id: str = None, days: int = 7):
+    """Récupère l'historique des pannes"""
+    failures = get_failure_history(machine_id, days)
+    return {
+        "status": "success",
+        "failures": failures,
+        "total_failures": len(failures),
+        "machine_id": machine_id,
+        "days": days,
+        "timestamp": datetime.now().isoformat()
+    }
+
+@app.get("/api/machines/config/{machine_id}")
+async def get_machine_configuration(machine_id: str):
+    """Récupère la configuration d'une machine"""
+    config = get_machine_config(machine_id)
+    return {
+        "status": "success" if config else "not_found",
+        "config": config,
+        "timestamp": datetime.now().isoformat()
+    }
+
+@app.post("/api/machines/config/{machine_id}")
+async def update_machine_configuration(machine_id: str, config: dict):
+    """Met à jour la configuration d'une machine"""
+    success = save_machine_config(machine_id, config)
+    return {
+        "status": "success" if success else "error",
+        "machine_id": machine_id,
+        "config": config,
+        "timestamp": datetime.now().isoformat()
+    }
+
+@app.get("/api/machines/config")
+async def get_all_machines_configuration():
+    """Récupère la configuration de toutes les machines"""
+    configs = get_all_machine_configs()
+    return {
+        "status": "success",
+        "configs": configs,
+        "total_machines": len(configs),
+        "timestamp": datetime.now().isoformat()
+    }
+
+@app.get("/api/alerts/active")
+async def get_active_alerts_new():
+    """Récupère les alertes actives avec plus de détails"""
+    alerts = get_active_alerts()
+    return {
+        "status": "success",
+        "alerts": alerts,
+        "active_count": len([a for a in alerts if not a.get('acknowledged', False)]),
+        "total_count": len(alerts),
         "timestamp": datetime.now().isoformat()
     }
 

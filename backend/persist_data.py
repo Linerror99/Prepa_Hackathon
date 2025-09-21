@@ -78,11 +78,43 @@ def init_db() -> None:
     );
     """)
     
+    # Table de l'historique des pannes
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS failure_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        timestamp TEXT NOT NULL,
+        machine_id TEXT NOT NULL,
+        failure_type TEXT NOT NULL,
+        failure_probability REAL,
+        anomaly_score REAL,
+        sensor_values TEXT,  -- JSON des valeurs capteurs au moment de la panne
+        resolved BOOLEAN DEFAULT 0,
+        resolution_notes TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+    
+    # Table de configuration des machines
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS machine_config (
+        machine_id TEXT PRIMARY KEY,
+        display_name TEXT,
+        location_details TEXT,
+        anomaly_threshold REAL DEFAULT 0.5,
+        maintenance_schedule TEXT,
+        contact_person TEXT,
+        custom_settings TEXT,  -- JSON pour paramètres spécifiques
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+    
     # Index pour les performances
     cur.execute("CREATE INDEX IF NOT EXISTS idx_readings_ts ON readings(timestamp);")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_readings_machine ON readings(machine_id);")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_alerts_ts ON alerts(timestamp);")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_alerts_machine ON alerts(machine_id);")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_failure_history_ts ON failure_history(timestamp);")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_failure_history_machine ON failure_history(machine_id);")
     
     conn.commit()
     conn.close()
@@ -359,6 +391,166 @@ def get_db_info() -> Dict:
     except Exception as e:
         logger.error(f"❌ Erreur info DB: {e}")
         return {}
+
+# ===== NOUVELLES FONCTIONS - HISTORIQUE & CONFIG =====
+
+def save_failure(machine_id: str, failure_type: str, failure_probability: float, 
+                anomaly_score: float, sensor_values: Dict) -> bool:
+    """Sauvegarde une panne détectée dans l'historique"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        
+        cur.execute("""
+        INSERT INTO failure_history (
+            timestamp, machine_id, failure_type, failure_probability, 
+            anomaly_score, sensor_values
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        """, (
+            datetime.now().isoformat(),
+            machine_id,
+            failure_type,
+            failure_probability,
+            anomaly_score,
+            json.dumps(sensor_values)
+        ))
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"💾 Panne sauvegardée: {machine_id} - {failure_type}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Erreur sauvegarde panne: {e}")
+        return False
+
+def get_failure_history(machine_id: str = None, days: int = 7) -> List[Dict]:
+    """Récupère l'historique des pannes"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        
+        since_date = (datetime.now() - timedelta(days=days)).isoformat()
+        
+        if machine_id:
+            cur.execute("""
+            SELECT * FROM failure_history 
+            WHERE machine_id = ? AND timestamp >= ? 
+            ORDER BY timestamp DESC
+            """, (machine_id, since_date))
+        else:
+            cur.execute("""
+            SELECT * FROM failure_history 
+            WHERE timestamp >= ? 
+            ORDER BY timestamp DESC
+            """, (since_date,))
+        
+        results = []
+        for row in cur.fetchall():
+            result = dict(row)
+            # Déserialiser sensor_values
+            if result['sensor_values']:
+                result['sensor_values'] = json.loads(result['sensor_values'])
+            results.append(result)
+        
+        conn.close()
+        return results
+        
+    except Exception as e:
+        logger.error(f"❌ Erreur récupération historique: {e}")
+        return []
+
+def save_machine_config(machine_id: str, config: Dict) -> bool:
+    """Sauvegarde la configuration d'une machine"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        
+        cur.execute("""
+        INSERT OR REPLACE INTO machine_config (
+            machine_id, display_name, location_details, anomaly_threshold,
+            maintenance_schedule, contact_person, custom_settings, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            machine_id,
+            config.get('display_name', ''),
+            config.get('location_details', ''),
+            config.get('anomaly_threshold', 0.5),
+            config.get('maintenance_schedule', ''),
+            config.get('contact_person', ''),
+            json.dumps(config.get('custom_settings', {})),
+            datetime.now().isoformat()
+        ))
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"⚙️ Configuration sauvegardée: {machine_id}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Erreur sauvegarde config: {e}")
+        return False
+
+def get_machine_config(machine_id: str) -> Dict:
+    """Récupère la configuration d'une machine"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        
+        cur.execute("""
+        SELECT * FROM machine_config WHERE machine_id = ?
+        """, (machine_id,))
+        
+        row = cur.fetchone()
+        conn.close()
+        
+        if row:
+            result = dict(row)
+            if result['custom_settings']:
+                result['custom_settings'] = json.loads(result['custom_settings'])
+            return result
+        else:
+            # Configuration par défaut
+            return {
+                'machine_id': machine_id,
+                'display_name': machine_id,
+                'location_details': '',
+                'anomaly_threshold': 0.5,
+                'maintenance_schedule': '',
+                'contact_person': '',
+                'custom_settings': {}
+            }
+        
+    except Exception as e:
+        logger.error(f"❌ Erreur récupération config: {e}")
+        return {}
+
+def get_all_machine_configs() -> List[Dict]:
+    """Récupère la configuration de toutes les machines"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        
+        cur.execute("SELECT * FROM machine_config ORDER BY machine_id")
+        
+        results = []
+        for row in cur.fetchall():
+            result = dict(row)
+            if result['custom_settings']:
+                result['custom_settings'] = json.loads(result['custom_settings'])
+            results.append(result)
+        
+        conn.close()
+        return results
+        
+    except Exception as e:
+        logger.error(f"❌ Erreur récupération configs: {e}")
+        return []
 
 if __name__ == "__main__":
     # Test de la base de données

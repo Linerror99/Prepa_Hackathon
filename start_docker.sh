@@ -127,10 +127,19 @@ build_images() {
 
 # Démarrage des services
 start_services() {
-    log "INFO" "🚀 Démarrage des services..."
+    log "INFO" "🚀 Reconstruction complète des images..."
     
     cd "$PROJECT_ROOT"
     
+    # Reconstruction avec --no-cache
+    if docker compose build --no-cache; then
+        log "SUCCESS" "✅ Images reconstruites avec succès"
+    else
+        log "ERROR" "❌ Erreur lors de la reconstruction"
+        return 1
+    fi
+    
+    # Démarrage des services
     if docker compose up -d; then
         log "SUCCESS" "✅ Services démarrés avec succès"
         return 0
