@@ -3,6 +3,7 @@
 Surveillance Prédictive en Direct avec Auto-Refresh
 """
 
+import os
 import streamlit as st
 import plotly.graph_objects as go
 import plotly.express as px
@@ -33,7 +34,7 @@ window.parent.addEventListener('beforeunload', function(e) {
 """, unsafe_allow_html=True)
 
 # Configuration globale
-BACKEND_URL = "http://localhost:8000"
+BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 
 # CSS pour améliorer l'apparence
 st.markdown("""

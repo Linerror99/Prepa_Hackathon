@@ -24,8 +24,8 @@ class DataReplay:
         self._setup_mqtt()
         
         # Charger les données
-        self.data = pd.read_csv('../data/raw/ai4i2020_demo.csv')
-        self.scenarios = pd.read_csv('../data/processed/failure_scenarios.csv')
+        self.data = pd.read_csv('/app/data/raw/ai4i2020_demo.csv')
+        self.scenarios = pd.read_csv('/app/data/processed/failure_scenarios.csv')
         
         logger.info(f"Données chargées: {len(self.data)} échantillons")
     

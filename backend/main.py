@@ -3,6 +3,7 @@ Backend API FastAPI pour système de maintenance prédictive
 Intègre MQTT, IA et APIs temps réel pour le hackathon IoT
 """
 
+import os
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -82,8 +83,9 @@ class FleetSummary(BaseModel):
 class MQTTManager:
     """Gestionnaire des connexions MQTT"""
     
-    def __init__(self, broker_host: str = "localhost", broker_port: int = 1883):
-        self.broker_host = broker_host
+    def __init__(self, broker_host: str = None, broker_port: int = 1883):
+        # Utiliser la variable d'environnement ou localhost par défaut
+        self.broker_host = broker_host or os.getenv("MQTT_BROKER", "localhost")
         self.broker_port = broker_port
         self.client = None
         self.connected = False

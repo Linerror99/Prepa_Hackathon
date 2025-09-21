@@ -3,6 +3,7 @@ Simulateur IoT de machines industrielles basé sur les données réelles AI4I
 Reproduit les patterns de pannes authentiques via MQTT
 """
 
+import os
 import asyncio
 import json
 import random
@@ -262,7 +263,7 @@ class MachineSimulator:
         """Détecte le statut et la probabilité de panne"""
         # Charger les seuils d'alerte
         try:
-            with open('../data/processed/alert_thresholds.json', 'r') as f:
+            with open('/app/data/processed/alert_thresholds.json', 'r') as f:
                 thresholds = json.load(f)
         except FileNotFoundError:
             # Seuils par défaut si le fichier n'existe pas
@@ -332,7 +333,8 @@ class IoTSimulator:
     
     def __init__(self, num_machines: int = 3, mqtt_broker: str = "localhost", mqtt_port: int = 1883):
         self.num_machines = num_machines
-        self.mqtt_broker = mqtt_broker
+        # Utiliser la variable d'environnement ou la valeur par défaut
+        self.mqtt_broker = os.getenv("MQTT_BROKER", mqtt_broker)
         self.mqtt_port = mqtt_port
         self.machines: List[MachineSimulator] = []
         self.mqtt_client: Optional[mqtt.Client] = None
@@ -347,8 +349,8 @@ class IoTSimulator:
     def _load_data(self) -> None:
         """Charge les données et scénarios"""
         try:
-            self.base_data = pd.read_csv('../data/raw/ai4i2020_demo.csv')
-            self.scenarios = pd.read_csv('../data/processed/failure_scenarios.csv')
+            self.base_data = pd.read_csv('/app/data/raw/ai4i2020_demo.csv')
+            self.scenarios = pd.read_csv('/app/data/processed/failure_scenarios.csv')
             logger.info(f"Données chargées: {len(self.base_data)} échantillons, {len(self.scenarios)} scénarios")
         except FileNotFoundError as e:
             logger.error(f"Impossible de charger les données: {e}")
@@ -507,7 +509,7 @@ def main():
     parser.add_argument("--machines", type=int, default=3, help="Nombre de machines à simuler")
     parser.add_argument("--duration", type=int, help="Durée en minutes (infini si non spécifié)")
     parser.add_argument("--interval", type=float, default=2.0, help="Intervalle entre lectures (secondes)")
-    parser.add_argument("--mqtt-broker", default="localhost", help="Adresse du broker MQTT")
+    parser.add_argument("--mqtt-broker", default=os.getenv("MQTT_BROKER", "localhost"), help="Adresse du broker MQTT")
     parser.add_argument("--mqtt-port", type=int, default=1883, help="Port du broker MQTT")
     
     args = parser.parse_args()

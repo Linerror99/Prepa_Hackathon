@@ -36,7 +36,7 @@ class SmartPredictiveEngine:
     Phase 2 (Avancé): Prophet pour prédire les pannes futures dans le temps
     """
     
-    def __init__(self, data_path: str = "../data"):
+    def __init__(self, data_path: str = "/app/data"):
         self.data_path = Path(data_path)
         self.models_path = self.data_path / "models"
         self.models_path.mkdir(exist_ok=True)

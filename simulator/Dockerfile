@@ -10,9 +10,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Variables d'environnement par défaut
+ENV PYTHONUNBUFFERED=1
 ENV MQTT_BROKER=mosquitto
 ENV NUM_MACHINES=3
 ENV READING_INTERVAL=2.0
 
-# Commande par défaut
-CMD ["python", "machine_simulator.py", "--machines", "${NUM_MACHINES}", "--interval", "${READING_INTERVAL}", "--mqtt-broker", "${MQTT_BROKER}"]
+# Commande par défaut (corrigée)
+CMD ["python", "machine_simulator.py", "--machines", "3", "--interval", "2.0", "--mqtt-broker", "mosquitto"]
