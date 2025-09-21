@@ -336,6 +336,7 @@ class IoTSimulator:
         self.mqtt_port = mqtt_port
         self.machines: List[MachineSimulator] = []
         self.mqtt_client: Optional[mqtt.Client] = None
+        self.mqtt_connected = False
         self.running = False
         
         # Charger les données
@@ -364,7 +365,8 @@ class IoTSimulator:
     
     def _setup_mqtt(self) -> None:
         """Configure le client MQTT"""
-        self.mqtt_client = mqtt.Client()
+        # Corriger l'API dépréciée
+        self.mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
         self.mqtt_client.on_connect = self._on_mqtt_connect
         self.mqtt_client.on_disconnect = self._on_mqtt_disconnect
         
@@ -375,14 +377,18 @@ class IoTSimulator:
             logger.warning(f"Impossible de se connecter au broker MQTT: {e}")
             logger.info("Mode simulation sans MQTT activé")
     
-    def _on_mqtt_connect(self, client, userdata, flags, rc):
+    def _on_mqtt_connect(self, client, userdata, flags, rc, properties=None):
         if rc == 0:
-            logger.info("Connecté au broker MQTT")
+            self.mqtt_connected = True
+            logger.info("✅ Simulateur connecté au broker MQTT")
         else:
-            logger.error(f"Échec de connexion MQTT, code: {rc}")
+            self.mqtt_connected = False
+            logger.error(f"❌ Échec de connexion MQTT, code: {rc}")
     
-    def _on_mqtt_disconnect(self, client, userdata, rc):
-        logger.info("Déconnecté du broker MQTT")
+    def _on_mqtt_disconnect(self, client, userdata, flags, rc, properties=None):
+        if self.mqtt_connected:  # Éviter les logs répétés
+            self.mqtt_connected = False
+            logger.info("📡 Simulateur déconnecté du broker MQTT")
     
     def start_simulation(self, duration_minutes: Optional[int] = None, reading_interval: float = 2.0) -> None:
         """Démarre la simulation"""
@@ -424,7 +430,7 @@ class IoTSimulator:
             readings.append(reading)
             
             # Publier via MQTT si connecté
-            if self.mqtt_client and self.mqtt_client.is_connected():
+            if self.mqtt_connected and self.mqtt_client and self.mqtt_client.is_connected():
                 topic = f"iot/machines/{machine.machine_id}/sensors"
                 self.mqtt_client.publish(topic, reading.to_json())
             
@@ -433,7 +439,7 @@ class IoTSimulator:
                 logger.warning(f"🚨 {machine.machine_id}: {reading.status.upper()} - Prob panne: {reading.predicted_failure_probability:.2f}")
         
         # Publier un résumé global
-        if self.mqtt_client and self.mqtt_client.is_connected():
+        if self.mqtt_connected and self.mqtt_client and self.mqtt_client.is_connected():
             summary = self._create_summary(readings)
             self.mqtt_client.publish("iot/fleet/summary", json.dumps(summary, default=str))
     

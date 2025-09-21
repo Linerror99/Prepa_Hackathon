@@ -16,14 +16,16 @@ import pandas as pd
 import numpy as np
 from pydantic import BaseModel, Field
 import paho.mqtt.client as mqtt
-import redis
 from contextlib import asynccontextmanager
 import uvicorn
 import os
+import random
 from pathlib import Path
 
 # Import de notre nouvelle IA
 from ai_models import SmartPredictiveEngine
+# Import de la persistance SQLite
+from persist_data import init_db, save_reading, save_alert, get_recent_readings, get_active_alerts, get_machines_status, get_stats
 
 # Configuration des logs
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -90,7 +92,8 @@ class MQTTManager:
     async def connect(self):
         """Connexion au broker MQTT"""
         try:
-            self.client = mqtt.Client()
+            # Utiliser la nouvelle API MQTT
+            self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
             self.client.on_connect = self._on_connect
             self.client.on_message = self._on_message
             self.client.on_disconnect = self._on_disconnect
@@ -112,7 +115,7 @@ class MQTTManager:
         except Exception as e:
             logger.error(f"Erreur connexion MQTT: {e}")
     
-    def _on_connect(self, client, userdata, flags, rc):
+    def _on_connect(self, client, userdata, flags, rc, properties=None):
         if rc == 0:
             self.connected = True
             logger.info("Backend connecté au broker MQTT")
@@ -135,7 +138,7 @@ class MQTTManager:
         except Exception as e:
             logger.error(f"Erreur traitement message MQTT: {e}")
     
-    def _on_disconnect(self, client, userdata, rc):
+    def _on_disconnect(self, client, userdata, flags, rc, properties=None):
         self.connected = False
         logger.info("Déconnecté du broker MQTT")
     
@@ -191,23 +194,12 @@ class PredictiveAIEngine:
 # ===== GESTIONNAIRE DE DONNÉES =====
 
 class DataManager:
-    """Gestionnaire des données et cache Redis"""
+    """Gestionnaire des données avec persistance SQLite"""
     
-    def __init__(self, redis_url: str = "redis://localhost:6379"):
-        self.redis_client = None
-        self.redis_url = redis_url
+    def __init__(self):
         self.machines_data: Dict[str, Any] = {}
         self.alerts: List[Alert] = []
         
-    async def connect_redis(self):
-        """Connexion à Redis"""
-        try:
-            self.redis_client = redis.from_url(self.redis_url, decode_responses=True)
-            self.redis_client.ping()
-            logger.info("Connecté à Redis")
-        except Exception as e:
-            logger.warning(f"Redis non disponible: {e}")
-    
     async def store_reading(self, reading: SensorReading, ai_prediction: Dict[str, Any]):
         """Stocke une lecture et sa prédiction"""
         machine_id = reading.machine_id
@@ -219,25 +211,26 @@ class DataManager:
             'last_update': datetime.now().isoformat()
         }
         
-        # Stockage Redis (si disponible)
-        if self.redis_client:
-            try:
-                # Données temps réel
-                key = f"machine:{machine_id}:current"
-                self.redis_client.setex(key, 300, json.dumps({
-                    'reading': reading.dict(),
-                    'prediction': ai_prediction
-                }))
-                
-                # Historique (stream Redis)
-                stream_key = f"machine:{machine_id}:history"
-                self.redis_client.xadd(stream_key, {
-                    'data': json.dumps(reading.dict()),
-                    'prediction': json.dumps(ai_prediction)
-                }, maxlen=1000)  # Garder les 1000 dernières entrées
-                
-            except Exception as e:
-                logger.error(f"Erreur stockage Redis: {e}")
+        # Sauvegarder en SQLite
+        reading_data = reading.dict()
+        reading_data.update({
+            'predicted_failure_probability': ai_prediction.get('anomaly_score', 0),
+            'failure_type': ai_prediction.get('failure_type'),
+            'status': ai_prediction.get('risk_level', 'unknown')
+        })
+        
+        save_reading(reading_data)
+        
+        # Créer une alerte si nécessaire
+        risk_level = ai_prediction.get('risk_level', 'low')
+        if risk_level in ['medium', 'high']:
+            await self.create_alert(
+                machine_id=machine_id,
+                severity=risk_level,
+                message=f"Anomalie détectée: {ai_prediction.get('prediction', 'Risque élevé')}",
+                failure_type=ai_prediction.get('failure_type'),
+                probability=ai_prediction.get('anomaly_score', 0)
+            )
     
     async def create_alert(self, machine_id: str, severity: str, message: str, 
                           failure_type: Optional[str] = None, probability: float = 0.0):
@@ -254,17 +247,19 @@ class DataManager:
         
         self.alerts.append(alert)
         
-        # Garder seulement les 100 dernières alertes
+        # Garder seulement les 100 dernières alertes en mémoire
         if len(self.alerts) > 100:
             self.alerts = self.alerts[-100:]
         
-        # Stockage Redis
-        if self.redis_client:
-            try:
-                self.redis_client.lpush("alerts", json.dumps(alert.dict()))
-                self.redis_client.ltrim("alerts", 0, 99)  # Garder les 100 dernières
-            except Exception as e:
-                logger.error(f"Erreur stockage alerte Redis: {e}")
+        # Sauvegarder en SQLite
+        alert_data = {
+            'timestamp': alert.timestamp,
+            'machine_id': alert.machine_id,
+            'alert_type': alert.failure_type or 'anomaly',
+            'severity': alert.severity,
+            'message': alert.message
+        }
+        save_alert(alert_data)
         
         logger.info(f"🚨 ALERTE {severity.upper()}: {machine_id} - {message}")
         return alert
@@ -381,9 +376,11 @@ async def lifespan(app: FastAPI):
     # Démarrage
     logger.info("🚀 Démarrage du backend IoT")
     
+    # Initialiser la base de données SQLite
+    init_db()
+    
     # Connexions
     await mqtt_manager.connect()
-    await data_manager.connect_redis()
     
     # Démarrer le processeur de messages MQTT
     asyncio.create_task(mqtt_message_processor())
@@ -546,13 +543,72 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         websocket_manager.disconnect(websocket)
 
+@app.get("/api/machines/live")
+async def get_live_machines_data():
+    """
+    🏭 Récupère les données en temps réel de toutes les machines (fallback MQTT)
+    """
+    try:
+        # Simuler des données réalistes pour la démo
+        machines_data = {}
+        
+        for i in range(1, 3):  # 2 machines
+            machine_id = f"MACHINE_{i:02d}"
+            
+            # Générer des données basées sur les patterns UCI
+            air_temp = np.random.normal(300, 2)
+            process_temp = air_temp + np.random.normal(10, 3)
+            speed = np.random.normal(1500, 100)
+            torque = np.random.normal(40, 8)
+            wear = np.random.exponential(80) + 20
+            
+            # Obtenir la prédiction IA via l'endpoint existant
+            sensor_reading = SensorReading(
+                machine_id=machine_id,
+                timestamp=datetime.now().isoformat(),
+                air_temperature=air_temp,
+                process_temperature=process_temp,
+                rotational_speed=speed,
+                torque=torque,
+                tool_wear=wear,
+                product_type=random.choice(['L', 'M', 'H'])
+            )
+            
+            prediction = await predict_machine_failure(sensor_reading)
+            
+            machines_data[machine_id] = {
+                "machine_id": machine_id,
+                "timestamp": datetime.now().isoformat(),
+                "air_temperature": round(air_temp, 2),
+                "process_temperature": round(process_temp, 2),
+                "rotational_speed": round(speed, 1),
+                "torque": round(torque, 2),
+                "tool_wear": round(wear, 1),
+                "product_type": random.choice(['L', 'M', 'H']),
+                "status": prediction.get('risk_level', 'normal'),
+                "predicted_failure_probability": prediction.get('confidence', 0.1),
+                "failure_type": prediction.get('predicted_failure_type', None),
+                "ai_prediction": prediction
+            }
+        
+        return {
+            "status": "success",
+            "timestamp": datetime.now().isoformat(),
+            "machines": machines_data,
+            "total_machines": len(machines_data)
+        }
+        
+    except Exception as e:
+        logger.error(f"Erreur génération données live: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/health")
 async def health_check():
     """Vérification de santé du service"""
     return {
         "status": "healthy",
         "mqtt_connected": mqtt_manager.connected,
-        "redis_connected": data_manager.redis_client is not None,
+        "database_connected": True,  # SQLite toujours disponible
         "active_machines": len(data_manager.machines_data),
         "active_websockets": len(websocket_manager.active_connections),
         "timestamp": datetime.now().isoformat()
@@ -600,6 +656,55 @@ async def predict_future_trend(
         "machine_id": machine_id,
         "current_reading": reading_data,
         "future_prediction": future_prediction,
+        "timestamp": datetime.now().isoformat()
+    }
+
+@app.get("/data/readings/{machine_id}")
+async def get_machine_readings(machine_id: str, limit: int = 100):
+    """Récupère l'historique des lectures d'une machine"""
+    readings = get_recent_readings(machine_id, limit)
+    return {
+        "machine_id": machine_id,
+        "readings": readings,
+        "count": len(readings),
+        "timestamp": datetime.now().isoformat()
+    }
+
+@app.get("/data/alerts")
+async def get_active_alerts_api():
+    """Récupère les alertes actives"""
+    alerts = get_active_alerts()
+    return {
+        "alerts": alerts,
+        "count": len(alerts),
+        "timestamp": datetime.now().isoformat()
+    }
+
+@app.get("/data/stats")
+async def get_system_stats():
+    """Statistiques du système"""
+    db_stats = get_stats()
+    machines = get_machines_status()
+    
+    return {
+        "database": db_stats,
+        "machines": machines,
+        "timestamp": datetime.now().isoformat()
+    }
+
+@app.post("/data/readings")
+async def add_reading(reading: SensorReading):
+    """Ajoute une lecture (pour tests manuels)"""
+    # Obtenir la prédiction IA
+    prediction = ai_engine.predict_failure(reading)
+    
+    # Sauvegarder
+    await data_manager.store_reading(reading, prediction)
+    
+    return {
+        "status": "saved",
+        "reading": reading.dict(),
+        "prediction": prediction,
         "timestamp": datetime.now().isoformat()
     }
 

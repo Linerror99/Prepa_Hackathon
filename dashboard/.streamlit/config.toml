@@ -1,0 +1,32 @@
+[server]
+headless = true
+port = 8501
+address = "0.0.0.0"
+
+[browser]
+gatherUsageStats = false
+serverAddress = "localhost"
+serverPort = 8501
+
+[client]
+caching = true
+displayEnabled = true
+showErrorDetails = true
+
+[runner]
+magicEnabled = true
+installTracer = false
+
+[logger]
+level = "info"
+
+[theme]
+base = "dark"
+primaryColor = "#FF6B6B"
+backgroundColor = "#0E1117"
+secondaryBackgroundColor = "#262730"
+textColor = "#FAFAFA"
+
+[global]
+suppressDeprecationWarnings = true
+disableWatchdogWarning = true
