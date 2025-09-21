@@ -112,11 +112,11 @@ cleanup_existing() {
 
 # Construction des images
 build_images() {
-    log "INFO" "🔨 Construction des images Docker..."
+    log "INFO" "🔨 Construction des images Docker (cache activé)..."
     
     cd "$PROJECT_ROOT"
     
-    if docker compose build --no-cache; then
+    if docker compose build; then
         log "SUCCESS" "✅ Images construites avec succès"
         return 0
     else

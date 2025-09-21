@@ -3,6 +3,7 @@ Persistance SQLite pour les données IoT
 Stockage des lectures, alertes et historique
 """
 
+import os
 import sqlite3
 import json
 from pathlib import Path
@@ -12,8 +13,16 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Chemin de la base de données
-DB_PATH = Path(__file__).resolve().parent / "data" / "readings.db"
+# Chemin de la base de données - Docker/Local compatible
+DATABASE_PATH = os.getenv('DATABASE_PATH', '/app/data/readings.db')
+
+# Si le chemin n'est pas absolu, utiliser le dossier local
+if not os.path.isabs(DATABASE_PATH):
+    DB_PATH = Path(__file__).resolve().parent / "data" / "readings.db"
+else:
+    DB_PATH = Path(DATABASE_PATH)
+
+# Créer le dossier si nécessaire
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 def init_db() -> None:

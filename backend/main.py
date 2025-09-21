@@ -4,6 +4,8 @@ Intègre MQTT, IA et APIs temps réel pour le hackathon IoT
 """
 
 import os
+import queue
+import threading
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -80,6 +82,9 @@ class FleetSummary(BaseModel):
 
 # ===== GESTIONNAIRE MQTT =====
 
+# Queue thread-safe pour les messages MQTT
+mqtt_message_queue = queue.Queue(maxsize=1000)
+
 class MQTTManager:
     """Gestionnaire des connexions MQTT"""
     
@@ -89,33 +94,56 @@ class MQTTManager:
         self.broker_port = broker_port
         self.client = None
         self.connected = False
-        self.message_queue = asyncio.Queue()
+        # Pas besoin d'asyncio.Queue, on utilise la queue thread-safe globale
         
     async def connect(self):
-        """Connexion au broker MQTT"""
-        try:
-            # Utiliser la nouvelle API MQTT
-            self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
-            self.client.on_connect = self._on_connect
-            self.client.on_message = self._on_message
-            self.client.on_disconnect = self._on_disconnect
-            
-            self.client.connect(self.broker_host, self.broker_port, 60)
-            self.client.loop_start()
-            
-            # S'abonner aux topics
-            topics = [
-                "iot/machines/+/sensors",
-                "iot/fleet/summary",
-                "iot/alerts/+"
-            ]
-            
-            for topic in topics:
-                self.client.subscribe(topic)
-                logger.info(f"Abonnement au topic: {topic}")
+        """Connexion au broker MQTT avec retry automatique"""
+        max_retries = 10
+        retry_delay = 5
+        
+        for attempt in range(max_retries):
+            try:
+                # Utiliser la nouvelle API MQTT
+                self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+                self.client.on_connect = self._on_connect
+                self.client.on_message = self._on_message
+                self.client.on_disconnect = self._on_disconnect
                 
-        except Exception as e:
-            logger.error(f"Erreur connexion MQTT: {e}")
+                logger.info(f"Tentative connexion MQTT #{attempt + 1} vers {self.broker_host}:{self.broker_port}")
+                self.client.connect(self.broker_host, self.broker_port, 60)
+                self.client.loop_start()
+                
+                # S'abonner aux topics
+                topics = [
+                    "iot/machines/+/sensors",
+                    "iot/fleet/summary",
+                    "iot/alerts/+"
+                ]
+                
+                for topic in topics:
+                    self.client.subscribe(topic)
+                    logger.info(f"Abonnement au topic: {topic}")
+                
+                # Attendre connexion
+                await asyncio.sleep(2)
+                if self.connected:
+                    logger.info("✅ MQTT connecté avec succès!")
+                    return True
+                else:
+                    raise Exception("Connexion MQTT timeout")
+                    
+            except Exception as e:
+                logger.warning(f"Tentative #{attempt + 1} échouée: {e}")
+                if attempt < max_retries - 1:
+                    logger.info(f"Retry dans {retry_delay}s...")
+                    await asyncio.sleep(retry_delay)
+                    retry_delay = min(retry_delay * 1.5, 30)  # Backoff exponentiel
+                else:
+                    logger.error("❌ Impossible de se connecter au MQTT après toutes les tentatives")
+                    logger.info("🔄 Mode fallback activé - utilisation API directe")
+                    return False
+        
+        return False
     
     def _on_connect(self, client, userdata, flags, rc, properties=None):
         if rc == 0:
@@ -130,23 +158,42 @@ class MQTTManager:
             topic = msg.topic
             payload = json.loads(msg.payload.decode())
             
-            # Ajouter à la queue pour traitement asynchrone
-            asyncio.create_task(self.message_queue.put({
+            logger.info(f"🔥 Message MQTT reçu: {topic} - {payload.get('machine_id', 'N/A')}")
+            
+            # Ajouter directement à la queue thread-safe
+            message_data = {
                 'topic': topic,
                 'payload': payload,
                 'timestamp': datetime.now().isoformat()
-            }))
+            }
+            
+            # Utiliser la queue thread-safe globale
+            try:
+                mqtt_message_queue.put_nowait(message_data)
+                logger.debug(f"✅ Message ajouté à la queue: {topic}")
+            except queue.Full:
+                logger.warning("⚠️ Queue MQTT pleine, message ignoré")
             
         except Exception as e:
-            logger.error(f"Erreur traitement message MQTT: {e}")
+            logger.error(f"❌ Erreur traitement message MQTT: {e}")
+            logger.error(f"📝 Topic: {msg.topic}, Payload: {msg.payload.decode()[:200]}...")
     
     def _on_disconnect(self, client, userdata, flags, rc, properties=None):
         self.connected = False
         logger.info("Déconnecté du broker MQTT")
     
     async def get_message(self):
-        """Récupère le prochain message de la queue"""
-        return await self.message_queue.get()
+        """Récupère le prochain message de la queue thread-safe"""
+        # Utiliser run_in_executor pour la queue bloquante
+        loop = asyncio.get_event_loop()
+        try:
+            # Attendre 1 seconde max pour un message
+            message = await loop.run_in_executor(None, lambda: mqtt_message_queue.get(timeout=1))
+            return message
+        except queue.Empty:
+            # Pas de message disponible
+            await asyncio.sleep(0.1)
+            return None
 
 # ===== MOTEUR IA PRÉDICTIF =====
 
@@ -387,6 +434,9 @@ async def lifespan(app: FastAPI):
     # Démarrer le processeur de messages MQTT
     asyncio.create_task(mqtt_message_processor())
     
+    # Démarrer le reconnecteur MQTT automatique
+    asyncio.create_task(mqtt_reconnect_task())
+    
     yield
     
     # Arrêt
@@ -411,25 +461,50 @@ app.add_middleware(
 
 # ===== PROCESSEUR DE MESSAGES MQTT =====
 
+async def mqtt_reconnect_task():
+    """Tâche background pour reconnecter MQTT automatiquement"""
+    while True:
+        try:
+            await asyncio.sleep(30)  # Vérifier toutes les 30 secondes
+            
+            if not mqtt_manager.connected:
+                logger.info("🔄 Tentative de reconnexion MQTT...")
+                await mqtt_manager.connect()
+                
+        except Exception as e:
+            logger.error(f"Erreur reconnexion MQTT: {e}")
+            await asyncio.sleep(10)
+
 async def mqtt_message_processor():
     """Traite les messages MQTT en arrière-plan"""
-    logger.info("Processeur de messages MQTT démarré")
+    logger.info("🔄 Processeur de messages MQTT démarré")
     
     while True:
         try:
             # Récupérer le prochain message
             message = await mqtt_manager.get_message()
+            
+            if message is None:
+                # Pas de message, continuer la boucle
+                continue
+                
+            logger.info(f"📨 Message MQTT traité: {message['topic']}")
+            
             topic = message['topic']
             payload = message['payload']
             
             # Traitement selon le type de topic
             if "/sensors" in topic:
+                logger.info(f"🔧 Traitement données capteur pour {payload.get('machine_id', 'N/A')}")
                 await process_sensor_data(payload)
             elif "/summary" in topic:
+                logger.info("📊 Traitement résumé flotte")
                 await process_fleet_summary(payload)
+            else:
+                logger.warning(f"❓ Topic inconnu: {topic}")
             
         except Exception as e:
-            logger.error(f"Erreur traitement message MQTT: {e}")
+            logger.error(f"❌ Erreur traitement message MQTT: {e}")
             await asyncio.sleep(1)
 
 async def process_sensor_data(data: dict):
@@ -548,50 +623,29 @@ async def websocket_endpoint(websocket: WebSocket):
 @app.get("/api/machines/live")
 async def get_live_machines_data():
     """
-    🏭 Récupère les données en temps réel de toutes les machines (fallback MQTT)
+    🏭 Récupère les données en temps réel de toutes les machines (vraies données MQTT uniquement)
     """
     try:
-        # Simuler des données réalistes pour la démo
         machines_data = {}
         
-        for i in range(1, 3):  # 2 machines
-            machine_id = f"MACHINE_{i:02d}"
-            
-            # Générer des données basées sur les patterns UCI
-            air_temp = np.random.normal(300, 2)
-            process_temp = air_temp + np.random.normal(10, 3)
-            speed = np.random.normal(1500, 100)
-            torque = np.random.normal(40, 8)
-            wear = np.random.exponential(80) + 20
-            
-            # Obtenir la prédiction IA via l'endpoint existant
-            sensor_reading = SensorReading(
-                machine_id=machine_id,
-                timestamp=datetime.now().isoformat(),
-                air_temperature=air_temp,
-                process_temperature=process_temp,
-                rotational_speed=speed,
-                torque=torque,
-                tool_wear=wear,
-                product_type=random.choice(['L', 'M', 'H'])
-            )
-            
-            prediction = await predict_machine_failure(sensor_reading)
-            
-            machines_data[machine_id] = {
-                "machine_id": machine_id,
-                "timestamp": datetime.now().isoformat(),
-                "air_temperature": round(air_temp, 2),
-                "process_temperature": round(process_temp, 2),
-                "rotational_speed": round(speed, 1),
-                "torque": round(torque, 2),
-                "tool_wear": round(wear, 1),
-                "product_type": random.choice(['L', 'M', 'H']),
-                "status": prediction.get('risk_level', 'normal'),
-                "predicted_failure_probability": prediction.get('confidence', 0.1),
-                "failure_type": prediction.get('predicted_failure_type', None),
-                "ai_prediction": prediction
-            }
+        # Récupérer uniquement les vraies données des machines connectées via MQTT
+        for machine_id in data_manager.machines_data.keys():
+            status = data_manager.get_machine_status(machine_id)
+            if status and status.last_reading:
+                machines_data[machine_id] = {
+                    "machine_id": machine_id,
+                    "timestamp": status.last_reading.timestamp,
+                    "air_temperature": status.last_reading.air_temperature,
+                    "process_temperature": status.last_reading.process_temperature,
+                    "rotational_speed": status.last_reading.rotational_speed,
+                    "torque": status.last_reading.torque,
+                    "tool_wear": status.last_reading.tool_wear,
+                    "product_type": status.last_reading.product_type,
+                    "status": status.status,
+                    "predicted_failure_probability": status.last_reading.predicted_failure_probability,
+                    "failure_type": status.last_reading.failure_type,
+                    "ai_prediction": {"source": "mqtt", "connected": True}
+                }
         
         return {
             "status": "success",

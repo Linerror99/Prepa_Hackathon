@@ -1,0 +1,15 @@
+services:
+  backend:
+    env_file:
+      - .env
+    environment:
+      - DATABASE_PATH=/app/data/readings.db
+      - ML_MODEL_PATH=/app/data/models
+      
+  dashboard:
+    env_file:
+      - .env
+      
+  simulator:
+    env_file:
+      - .env
