@@ -24,14 +24,12 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class SensorReading:
-    """Structure pour une lecture de capteur"""
+    """Structure pour une lecture de capteur industriel"""
     machine_id: str
     timestamp: str
-    air_temperature: float
-    process_temperature: float
-    rotational_speed: float
-    torque: float
-    tool_wear: float
+    temperature: float      # Température en °C (20-80°C)
+    pressure: float         # Pression en bar (1-10 bar)
+    velocity: float         # Vitesse en m/s (0.5-5.0 m/s)
     product_type: str
     status: str = "normal"
     predicted_failure_probability: float = 0.0
@@ -57,84 +55,86 @@ class FailureScenario:
 class MachineSimulator:
     """Simulateur pour une machine industrielle individuelle"""
     
-    def __init__(self, machine_id: str, base_data: pd.DataFrame, scenarios: pd.DataFrame):
+    def __init__(self, machine_id: str, base_data=None, scenarios=None):
         self.machine_id = machine_id
-        self.base_data = base_data
-        self.scenarios = scenarios
         self.current_scenario: Optional[FailureScenario] = None
         self.scenario_start_time: Optional[datetime] = None
         self.scenario_progress = 0.0
         
-        # Initialiser les variables d'état d'abord
-        self.tool_wear_accumulation = random.uniform(0, 50)
+        # Variables d'état pour simulation industrielle
         self.operating_hours = 0
         
-        # État actuel de la machine
+        # État actuel de la machine industrielle
         self.current_state = self._initialize_normal_state()
         
-        logger.info(f"Machine {machine_id} initialisée")
+        logger.info(f"Machine industrielle {machine_id} initialisée")
     
     def _initialize_normal_state(self) -> Dict[str, float]:
-        """Initialise l'état normal de la machine"""
-        normal_data = self.base_data[self.base_data['Machine failure'] == 0]
-        
+        """Initialise l'état normal de la machine industrielle"""
+        # Valeurs normales pour équipements industriels
         return {
-            'air_temperature': normal_data['Air temperature [K]'].mean(),
-            'process_temperature': normal_data['Process temperature [K]'].mean(),
-            'rotational_speed': normal_data['Rotational speed [rpm]'].mean(),
-            'torque': normal_data['Torque [Nm]'].mean(),
-            'tool_wear': self.tool_wear_accumulation
+            'temperature': random.uniform(25.0, 35.0),    # °C - température ambiante normale
+            'pressure': random.uniform(2.0, 4.0),         # bar - pression de fonctionnement normale
+            'velocity': random.uniform(1.0, 2.0)          # m/s - vitesse normale des composants
         }
     
     def start_failure_scenario(self, scenario_type: Optional[str] = None) -> None:
-        """Démarre un scénario de panne"""
-        if scenario_type:
-            available_scenarios = self.scenarios[self.scenarios['failure_type'] == scenario_type]
-        else:
-            available_scenarios = self.scenarios
+        """Démarre un scénario de panne industrielle"""
+        # Définir des scénarios de panne réalistes pour équipements industriels
+        industrial_scenarios = [
+            {
+                'failure_type': 'OVERHEATING', 
+                'description': 'Surchauffe des composants',
+                'final_values': {'temperature': 75.0, 'pressure': 3.5, 'velocity': 1.2}
+            },
+            {
+                'failure_type': 'PRESSURE_LOSS', 
+                'description': 'Perte de pression système',
+                'final_values': {'temperature': 28.0, 'pressure': 0.8, 'velocity': 0.3}
+            },
+            {
+                'failure_type': 'MECHANICAL_WEAR', 
+                'description': 'Usure mécanique excessive',
+                'final_values': {'temperature': 45.0, 'pressure': 2.1, 'velocity': 0.1}
+            },
+            {
+                'failure_type': 'VIBRATION_EXCESS', 
+                'description': 'Vibrations excessives',
+                'final_values': {'temperature': 40.0, 'pressure': 6.5, 'velocity': 4.8}
+            }
+        ]
         
-        if len(available_scenarios) > 0:
-            scenario_data = available_scenarios.sample(1).iloc[0]
-            
-            # Créer le pattern de progression
-            progression = self._create_failure_progression(scenario_data)
-            
-            self.current_scenario = FailureScenario(
-                scenario_id=scenario_data['scenario_id'],
-                failure_type=scenario_data['failure_type'],
-                severity=scenario_data['severity'],
-                description=scenario_data['description'],
-                initial_conditions={
-                    'air_temp': scenario_data['air_temp'],
-                    'process_temp': scenario_data['process_temp'],
-                    'rotational_speed': scenario_data['rotational_speed'],
-                    'torque': scenario_data['torque'],
-                    'tool_wear': scenario_data['tool_wear']
-                },
-                progression_pattern=progression
-            )
-            
-            self.scenario_start_time = datetime.now()
-            self.scenario_progress = 0.0
-            
-            logger.info(f"Machine {self.machine_id}: Démarrage scénario {scenario_data['failure_type']} - {scenario_data['description']}")
+        # Sélectionner un scénario
+        if scenario_type:
+            scenarios = [s for s in industrial_scenarios if s['failure_type'] == scenario_type]
+            scenario_data = scenarios[0] if scenarios else industrial_scenarios[0]
+        else:
+            scenario_data = random.choice(industrial_scenarios)
+        
+        # Créer le pattern de progression
+        progression = self._create_failure_progression(scenario_data['final_values'])
+        
+        self.current_scenario = FailureScenario(
+            scenario_id=random.randint(1, 1000),
+            failure_type=scenario_data['failure_type'],
+            severity='HIGH',
+            description=scenario_data['description'],
+            initial_conditions=self.current_state.copy(),
+            progression_pattern=progression
+        )
+        
+        self.scenario_start_time = datetime.now()
+        self.scenario_progress = 0.0
+        
+        logger.info(f"Machine {self.machine_id}: Démarrage scénario {scenario_data['failure_type']} - {scenario_data['description']}")
     
-    def _create_failure_progression(self, scenario_data: pd.Series) -> List[Dict[str, float]]:
-        """Crée un pattern de progression vers la panne"""
+    def _create_failure_progression(self, final_values: Dict[str, float]) -> List[Dict[str, float]]:
+        """Crée un pattern de progression vers la panne industrielle"""
         steps = 10  # Nombre d'étapes jusqu'à la panne
         progression = []
         
         # État initial (normal)
         initial = self.current_state.copy()
-        
-        # État final (panne)
-        final = {
-            'air_temperature': scenario_data['air_temp'],
-            'process_temperature': scenario_data['process_temp'],
-            'rotational_speed': scenario_data['rotational_speed'],
-            'torque': scenario_data['torque'],
-            'tool_wear': scenario_data['tool_wear']
-        }
         
         # Créer une progression non-linéaire
         for i in range(steps + 1):
@@ -144,8 +144,8 @@ class MachineSimulator:
             
             step_state = {}
             for key in initial.keys():
-                if key in final:
-                    step_state[key] = initial[key] + (final[key] - initial[key]) * weight
+                if key in final_values:
+                    step_state[key] = initial[key] + (final_values[key] - initial[key]) * weight
                 else:
                     step_state[key] = initial[key]
             
@@ -173,12 +173,10 @@ class MachineSimulator:
         return SensorReading(
             machine_id=self.machine_id,
             timestamp=now.isoformat(),
-            air_temperature=state_with_noise['air_temperature'],
-            process_temperature=state_with_noise['process_temperature'],
-            rotational_speed=state_with_noise['rotational_speed'],
-            torque=state_with_noise['torque'],
-            tool_wear=state_with_noise['tool_wear'],
-            product_type=random.choice(['L', 'M', 'H']),
+            temperature=state_with_noise['temperature'],
+            pressure=state_with_noise['pressure'],
+            velocity=state_with_noise['velocity'],
+            product_type=random.choice(['TypeA', 'TypeB', 'TypeC']),
             status=status,
             predicted_failure_probability=failure_prob,
             failure_type=failure_type
@@ -213,100 +211,106 @@ class MachineSimulator:
                     self.current_state[key] = lower_val + (upper_val - lower_val) * weight
     
     def _update_normal_state(self) -> None:
-        """Met à jour l'état normal avec évolution naturelle"""
-        # Accumulation de l'usure d'outil
-        self.tool_wear_accumulation += random.uniform(0.1, 0.5)
-        self.current_state['tool_wear'] = self.tool_wear_accumulation
+        """Met à jour l'état normal avec évolution naturelle industrielle"""
+        # Évolution naturelle des paramètres industriels
+        self.operating_hours += 5/60  # 5 minutes en heures
         
-        # Variations normales des autres paramètres
-        normal_data = self.base_data[self.base_data['Machine failure'] == 0]
-        
-        for param in ['air_temperature', 'process_temperature', 'rotational_speed', 'torque']:
+        # Légères variations normales autour des valeurs de consigne
+        for param in ['temperature', 'pressure', 'velocity']:
             if param in self.current_state:
-                param_name = {
-                    'air_temperature': 'Air temperature [K]',
-                    'process_temperature': 'Process temperature [K]',
-                    'rotational_speed': 'Rotational speed [rpm]',
-                    'torque': 'Torque [Nm]'
-                }[param]
-                
-                mean_val = normal_data[param_name].mean()
-                std_val = normal_data[param_name].std()
-                
-                # Légère dérive vers la moyenne avec du bruit
                 current_val = self.current_state[param]
-                drift = (mean_val - current_val) * 0.1  # 10% de retour vers la moyenne
-                noise = random.gauss(0, std_val * 0.1)  # 10% du bruit normal
+                
+                # Définir les plages normales et les dérives
+                if param == 'temperature':
+                    target_range = (25.0, 35.0)
+                    max_drift = 0.5
+                elif param == 'pressure':
+                    target_range = (2.0, 4.0)
+                    max_drift = 0.1
+                elif param == 'velocity':
+                    target_range = (1.0, 2.0)
+                    max_drift = 0.05
+                
+                # Dérive légère vers la plage normale
+                target_val = random.uniform(*target_range)
+                drift = (target_val - current_val) * 0.05  # 5% de retour vers la cible
+                noise = random.gauss(0, max_drift * 0.1)  # Bruit léger
                 
                 self.current_state[param] = current_val + drift + noise
     
     def _add_sensor_noise(self, state: Dict[str, float]) -> Dict[str, float]:
-        """Ajoute du bruit réaliste de capteur"""
+        """Ajoute du bruit réaliste de capteur industriel"""
         noisy_state = state.copy()
         
+        # Niveaux de bruit réalistes pour capteurs industriels
         noise_levels = {
-            'air_temperature': 0.5,      # ±0.5K
-            'process_temperature': 0.3,   # ±0.3K
-            'rotational_speed': 5.0,      # ±5 rpm
-            'torque': 0.5,               # ±0.5 Nm
-            'tool_wear': 0.1             # ±0.1 min
+            'temperature': 0.2,    # ±0.2°C (précision typique capteurs température)
+            'pressure': 0.05,      # ±0.05 bar (précision capteurs pression)
+            'velocity': 0.02       # ±0.02 m/s (précision capteurs vitesse)
         }
         
         for param, noise_level in noise_levels.items():
             if param in noisy_state:
                 noise = random.gauss(0, noise_level)
                 noisy_state[param] += noise
+                
+                # Appliquer les limites physiques
+                if param == 'temperature':
+                    noisy_state[param] = max(15.0, min(85.0, noisy_state[param]))
+                elif param == 'pressure':
+                    noisy_state[param] = max(0.1, min(12.0, noisy_state[param]))
+                elif param == 'velocity':
+                    noisy_state[param] = max(0.0, min(6.0, noisy_state[param]))
         
         return noisy_state
     
     def _detect_status(self, state: Dict[str, float]) -> tuple[str, float, Optional[str]]:
-        """Détecte le statut et la probabilité de panne"""
-        # Charger les seuils d'alerte
-        try:
-            with open('/app/data/processed/alert_thresholds.json', 'r') as f:
-                thresholds = json.load(f)
-        except FileNotFoundError:
-            # Seuils par défaut si le fichier n'existe pas
-            thresholds = {
-                'Air temperature [K]': {'threshold': 305.0, 'type': 'Seuil MAX'},
-                'Process temperature [K]': {'threshold': 315.0, 'type': 'Seuil MAX'},
-                'Tool wear [min]': {'threshold': 200.0, 'type': 'Seuil MAX'},
-                'Torque [Nm]': {'threshold': 50.0, 'type': 'Seuil MAX'},
-                'Rotational speed [rpm]': {'threshold': '1200.0 - 1800.0', 'type': 'Plage normale'}
-            }
+        """Détecte le statut et la probabilité de panne industrielle"""
+        # Seuils d'alerte industriels réalistes
+        thresholds = {
+            'temperature': {'min': 15.0, 'max': 50.0, 'critical': 65.0},
+            'pressure': {'min': 1.5, 'max': 6.0, 'critical': 8.0},
+            'velocity': {'min': 0.2, 'max': 3.5, 'critical': 5.0}
+        }
         
         alerts = []
         failure_prob = 0.0
         
-        # Vérifier chaque seuil
-        if state['air_temperature'] > thresholds.get('Air temperature [K]', {}).get('threshold', 305):
-            alerts.append('TEMP_HIGH')
-            failure_prob += 0.3
-        
-        if state['process_temperature'] > thresholds.get('Process temperature [K]', {}).get('threshold', 315):
-            alerts.append('PROCESS_TEMP_HIGH')
-            failure_prob += 0.25
-        
-        if state['tool_wear'] > thresholds.get('Tool wear [min]', {}).get('threshold', 200):
-            alerts.append('TOOL_WEAR_HIGH')
-            failure_prob += 0.4
-        
-        if state['torque'] > thresholds.get('Torque [Nm]', {}).get('threshold', 50):
-            alerts.append('TORQUE_HIGH')
-            failure_prob += 0.3
-        
-        if state['rotational_speed'] < 1200 or state['rotational_speed'] > 1800:
-            alerts.append('SPEED_ABNORMAL')
+        # Vérifier température
+        temp = state['temperature']
+        if temp > thresholds['temperature']['critical']:
+            alerts.append('TEMP_CRITICAL')
+            failure_prob += 0.5
+        elif temp > thresholds['temperature']['max'] or temp < thresholds['temperature']['min']:
+            alerts.append('TEMP_ABNORMAL')
             failure_prob += 0.2
         
-        # Déterminer le statut
-        if failure_prob > 0.8:
+        # Vérifier pression
+        pressure = state['pressure']
+        if pressure > thresholds['pressure']['critical']:
+            alerts.append('PRESSURE_CRITICAL')
+            failure_prob += 0.4
+        elif pressure > thresholds['pressure']['max'] or pressure < thresholds['pressure']['min']:
+            alerts.append('PRESSURE_ABNORMAL')
+            failure_prob += 0.15
+        
+        # Vérifier vitesse
+        velocity = state['velocity']
+        if velocity > thresholds['velocity']['critical']:
+            alerts.append('VELOCITY_CRITICAL')
+            failure_prob += 0.3
+        elif velocity > thresholds['velocity']['max'] or velocity < thresholds['velocity']['min']:
+            alerts.append('VELOCITY_ABNORMAL')
+            failure_prob += 0.1
+        
+        # Déterminer le statut industriel
+        if failure_prob > 0.7:
             status = "critical"
             failure_type = self._predict_failure_type(state, alerts)
-        elif failure_prob > 0.5:
+        elif failure_prob > 0.4:
             status = "warning"
             failure_type = None
-        elif failure_prob > 0.2:
+        elif failure_prob > 0.15:
             status = "alert"
             failure_type = None
         else:
@@ -316,17 +320,17 @@ class MachineSimulator:
         return status, min(failure_prob, 1.0), failure_type
     
     def _predict_failure_type(self, state: Dict[str, float], alerts: List[str]) -> Optional[str]:
-        """Prédit le type de panne probable"""
-        if 'TOOL_WEAR_HIGH' in alerts:
-            return 'TWF'
-        elif 'TEMP_HIGH' in alerts or 'PROCESS_TEMP_HIGH' in alerts:
-            return 'HDF'
-        elif 'TORQUE_HIGH' in alerts and 'SPEED_ABNORMAL' in alerts:
-            return 'PWF'
-        elif 'TORQUE_HIGH' in alerts:
-            return 'OSF'
+        """Prédit le type de panne industrielle probable"""
+        if 'TEMP_CRITICAL' in alerts:
+            return 'OVERHEATING'
+        elif 'PRESSURE_CRITICAL' in alerts:
+            return 'PRESSURE_LOSS'
+        elif 'VELOCITY_CRITICAL' in alerts:
+            return 'MECHANICAL_WEAR'
+        elif any('ABNORMAL' in alert for alert in alerts):
+            return 'VIBRATION_EXCESS'
         else:
-            return 'RNF'
+            return 'SYSTEM_DEGRADATION'
 
 class IoTSimulator:
     """Simulateur principal IoT multi-machines"""
@@ -347,23 +351,18 @@ class IoTSimulator:
         self._setup_mqtt()
     
     def _load_data(self) -> None:
-        """Charge les données et scénarios"""
-        try:
-            self.base_data = pd.read_csv('/app/data/raw/ai4i2020_demo.csv')
-            self.scenarios = pd.read_csv('/app/data/processed/failure_scenarios.csv')
-            logger.info(f"Données chargées: {len(self.base_data)} échantillons, {len(self.scenarios)} scénarios")
-        except FileNotFoundError as e:
-            logger.error(f"Impossible de charger les données: {e}")
-            raise
+        """Initialise les données pour simulation industrielle"""
+        # Plus besoin de charger des fichiers UCI - simulation autonome
+        logger.info("Mode simulation industrielle autonome activé")
     
     def _initialize_machines(self) -> None:
-        """Initialise les simulateurs de machines"""
+        """Initialise les simulateurs de machines industrielles"""
         for i in range(self.num_machines):
             machine_id = f"MACHINE_{i+1:02d}"
-            machine = MachineSimulator(machine_id, self.base_data, self.scenarios)
+            machine = MachineSimulator(machine_id, None, None)  # Plus de dépendances aux fichiers
             self.machines.append(machine)
         
-        logger.info(f"{len(self.machines)} machines initialisées")
+        logger.info(f"{len(self.machines)} machines industrielles initialisées")
     
     def _setup_mqtt(self) -> None:
         """Configure le client MQTT"""
@@ -392,10 +391,10 @@ class IoTSimulator:
             self.mqtt_connected = False
             logger.info("📡 Simulateur déconnecté du broker MQTT")
     
-    def start_simulation(self, duration_minutes: Optional[int] = None, reading_interval: float = 2.0) -> None:
-        """Démarre la simulation"""
-        logger.info(f"🚀 Démarrage simulation IoT avec {len(self.machines)} machines")
-        logger.info(f"📊 Intervalle de lecture: {reading_interval}s")
+    def start_simulation(self, duration_minutes: Optional[int] = None, reading_interval: float = 300.0) -> None:
+        """Démarre la simulation industrielle"""
+        logger.info(f"🏭 Démarrage simulation industrielle avec {len(self.machines)} machines")
+        logger.info(f"📊 Intervalle de lecture industriel: {reading_interval}s ({reading_interval/60:.1f} min)")
         
         if duration_minutes:
             logger.info(f"⏱️ Durée: {duration_minutes} minutes")
@@ -472,16 +471,17 @@ class IoTSimulator:
         }
     
     def _trigger_random_failures(self) -> None:
-        """Déclenche aléatoirement des scénarios de panne"""
-        # 1% de chance par cycle de déclencher une panne sur une machine
-        if random.random() < 0.01:
+        """Déclenche aléatoirement des scénarios de panne industrielle"""
+        # 2% de chance par cycle de déclencher une panne sur une machine (plus fréquent avec les intervalles de 5min)
+        if random.random() < 0.02:
             # Choisir une machine au hasard qui n'a pas déjà de scénario actif
             available_machines = [m for m in self.machines if m.current_scenario is None]
             
             if available_machines:
                 machine = random.choice(available_machines)
-                failure_type = random.choice(['TWF', 'HDF', 'PWF', 'OSF', 'RNF'])
+                failure_type = random.choice(['OVERHEATING', 'PRESSURE_LOSS', 'MECHANICAL_WEAR', 'VIBRATION_EXCESS'])
                 machine.start_failure_scenario(failure_type)
+                logger.info(f"🔥 Panne simulée: {failure_type} sur {machine.machine_id}")
     
     def trigger_failure_scenario(self, machine_id: str, failure_type: str) -> bool:
         """Déclenche manuellement un scénario de panne"""
@@ -508,19 +508,20 @@ def main():
     parser = argparse.ArgumentParser(description="Simulateur IoT industriel basé sur données réelles")
     parser.add_argument("--machines", type=int, default=3, help="Nombre de machines à simuler")
     parser.add_argument("--duration", type=int, help="Durée en minutes (infini si non spécifié)")
-    parser.add_argument("--interval", type=float, default=2.0, help="Intervalle entre lectures (secondes)")
+    parser.add_argument("--interval", type=float, default=300.0, help="Intervalle entre lectures industrielles (secondes) - défaut 5 minutes")
     parser.add_argument("--mqtt-broker", default=os.getenv("MQTT_BROKER", "localhost"), help="Adresse du broker MQTT")
     parser.add_argument("--mqtt-port", type=int, default=1883, help="Port du broker MQTT")
     
     args = parser.parse_args()
     
-    # Créer et démarrer le simulateur
+    # Créer et démarrer le simulateur industriel
     simulator = IoTSimulator(
         num_machines=args.machines,
         mqtt_broker=args.mqtt_broker,
         mqtt_port=args.mqtt_port
     )
     
+    logger.info(f"🏭 Démarrage simulateur industriel - {args.machines} machines, intervalle {args.interval}s")
     simulator.start_simulation(
         duration_minutes=args.duration,
         reading_interval=args.interval

@@ -187,47 +187,47 @@ def main():
             with col1:
                 st.subheader(f"🌡️ Capteurs - {selected_machine}")
                 
-                # Graphique des températures
+                # Graphique de température industrielle
                 fig_temp = go.Figure()
                 fig_temp.add_trace(go.Indicator(
                     mode="gauge+number+delta",
-                    value=machine_data.get('air_temperature', 0),
+                    value=machine_data.get('temperature', 0),
                     domain={'x': [0, 1], 'y': [0, 1]},
-                    title={'text': "Température Air (K)"},
+                    title={'text': "Température (°C)"},
                     gauge={
-                        'axis': {'range': [290, 320]},
-                        'bar': {'color': "darkblue"},
+                        'axis': {'range': [15, 80]},
+                        'bar': {'color': "darkred"},
                         'steps': [
-                            {'range': [290, 305], 'color': "lightgray"},
-                            {'range': [305, 315], 'color': "yellow"},
-                            {'range': [315, 320], 'color': "red"}
+                            {'range': [15, 40], 'color': "lightgreen"},
+                            {'range': [40, 60], 'color': "yellow"},
+                            {'range': [60, 80], 'color': "red"}
                         ],
                         'threshold': {
                             'line': {'color': "red", 'width': 4},
                             'thickness': 0.75,
-                            'value': 305
+                            'value': 50
                         }
                     }
                 ))
                 
-                st.plotly_chart(fig_temp, use_container_width=True)
+                st.plotly_chart(fig_temp, use_container_width=True, key=f"temp_gauge_{selected_machine}")
             
             with col2:
-                st.subheader(f"🔧 État Mécanique - {selected_machine}")
+                st.subheader(f"⚙️ Système Hydraulique - {selected_machine}")
                 
-                # Graphique vitesse/couple
+                # Graphique pression/vitesse
                 fig_mech = make_subplots(
                     rows=2, cols=1,
-                    subplot_titles=('Vitesse Rotation (rpm)', 'Couple (Nm)'),
+                    subplot_titles=('Pression Système (bar)', 'Vitesse Composants (m/s)'),
                     vertical_spacing=0.1
                 )
                 
                 fig_mech.add_trace(
                     go.Scatter(
                         x=[datetime.now()],
-                        y=[machine_data.get('rotational_speed', 0)],
+                        y=[machine_data.get('pressure', 0)],
                         mode='markers+lines',
-                        name='Vitesse',
+                        name='Pression',
                         marker=dict(size=10, color='blue')
                     ),
                     row=1, col=1
@@ -236,27 +236,25 @@ def main():
                 fig_mech.add_trace(
                     go.Scatter(
                         x=[datetime.now()],
-                        y=[machine_data.get('torque', 0)],
+                        y=[machine_data.get('velocity', 0)],
                         mode='markers+lines',
-                        name='Couple',
-                        marker=dict(size=10, color='red')
+                        name='Vitesse',
+                        marker=dict(size=10, color='green')
                     ),
                     row=2, col=1
                 )
                 
                 fig_mech.update_layout(height=400, showlegend=False)
-                st.plotly_chart(fig_mech, use_container_width=True)
+                st.plotly_chart(fig_mech, use_container_width=True, key=f"mech_chart_{selected_machine}")
             
             # Prédiction IA en temps réel
             st.subheader(f"🧠 Prédiction IA - {selected_machine}")
             
-            # Préparer les données pour l'IA
+            # Préparer les données industrielles pour l'IA
             ai_data = {
-                "air_temperature": machine_data.get('air_temperature', 300),
-                "process_temperature": machine_data.get('process_temperature', 310),
-                "rotational_speed": machine_data.get('rotational_speed', 1500),
-                "torque": machine_data.get('torque', 40),
-                "tool_wear": machine_data.get('tool_wear', 100)
+                "temperature": machine_data.get('temperature', 30.0),
+                "pressure": machine_data.get('pressure', 3.0),
+                "velocity": machine_data.get('velocity', 1.5)
             }
             
             # Tester la prédiction
@@ -311,11 +309,11 @@ def main():
         fig_history = px.line(
             df_history.tail(100),  # 100 derniers points
             x='timestamp',
-            y=['air_temperature', 'process_temperature'],
-            title="Évolution des Températures"
+            y=['temperature', 'pressure', 'velocity'],
+            title="Évolution des Capteurs Industriels"
         )
         
-        st.plotly_chart(fig_history, use_container_width=True)
+        st.plotly_chart(fig_history, use_container_width=True, key="history_chart")
     
     # Section Debug
     if show_debug:
@@ -327,13 +325,11 @@ def main():
         with st.expander("Résumé Flotte"):
             st.json(dashboard_data.fleet_summary)
         
-        with st.expander("Test IA"):
+        with st.expander("Test IA Industriel"):
             test_data = {
-                "air_temperature": 305.0,
-                "process_temperature": 318.0,
-                "rotational_speed": 1420.0,
-                "torque": 55.0,
-                "tool_wear": 180.0
+                "temperature": 65.0,
+                "pressure": 1.2,
+                "velocity": 0.3
             }
             
             if st.button("🧪 Tester Prédiction"):

@@ -41,12 +41,13 @@ class SmartPredictiveEngine:
         self.models_path = self.data_path / "models"
         self.models_path.mkdir(exist_ok=True)
         
-        # Phase 1: Détection d'anomalies
+        # Phase 1: Détection d'anomalies industrielles
         self.anomaly_detectors = {}  # Un détecteur par type de panne
         self.scalers = {}
         self.feature_columns = [
-            'air_temperature', 'process_temperature', 'rotational_speed', 
-            'torque', 'tool_wear'
+            'temperature',    # °C - température des équipements
+            'pressure',       # bar - pression système
+            'velocity'        # m/s - vitesse des composants
         ]
         
         # Phase 2: Prédiction temporelle
@@ -95,85 +96,64 @@ class SmartPredictiveEngine:
             return self._generate_synthetic_training_data()
     
     def _generate_synthetic_training_data(self) -> pd.DataFrame:
-        """Génère des données synthétiques réalistes pour l'entraînement"""
+        """Génère des données synthétiques industrielles réalistes pour l'entraînement"""
         np.random.seed(42)
         n_samples = 5000
         
-        # Données normales (80%)
-        n_normal = int(n_samples * 0.8)
+        # Données normales (85% - équipements industriels plus fiables)
+        n_normal = int(n_samples * 0.85)
         normal_data = {
-            'air_temperature': np.random.normal(300, 2, n_normal),
-            'process_temperature': np.random.normal(310, 8, n_normal),
-            'rotational_speed': np.random.normal(1500, 100, n_normal),
-            'torque': np.random.normal(40, 10, n_normal),
-            'tool_wear': np.random.exponential(100, n_normal),
+            'temperature': np.random.normal(30.0, 3.0, n_normal),      # 30°C ±3°C normale
+            'pressure': np.random.normal(3.0, 0.5, n_normal),          # 3 bar ±0.5 normale  
+            'velocity': np.random.normal(1.5, 0.3, n_normal),          # 1.5 m/s ±0.3 normale
             'failure': [0] * n_normal
         }
         
-        # Données avec pannes (20%)
+        # Données avec pannes (15% - pannes industrielles réalistes)
         n_failure = n_samples - n_normal
         
-        # TWF - Tool Wear Failure
-        n_twf = n_failure // 5
-        twf_data = {
-            'air_temperature': np.random.normal(300, 3, n_twf),
-            'process_temperature': np.random.normal(310, 10, n_twf),
-            'rotational_speed': np.random.normal(1500, 120, n_twf),
-            'torque': np.random.normal(50, 15, n_twf),  # Couple élevé
-            'tool_wear': np.random.normal(250, 50, n_twf),  # Usure excessive
-            'failure': [1] * n_twf
+        # OVERHEATING - Surchauffe des équipements
+        n_overheating = n_failure // 4
+        overheating_data = {
+            'temperature': np.random.normal(65.0, 8.0, n_overheating),   # Surchauffe critique
+            'pressure': np.random.normal(3.2, 0.6, n_overheating),       # Pression légèrement élevée
+            'velocity': np.random.normal(1.3, 0.4, n_overheating),       # Vitesse réduite par surchauffe
+            'failure': [1] * n_overheating
         }
         
-        # HDF - Heat Dissipation Failure  
-        n_hdf = n_failure // 5
-        hdf_data = {
-            'air_temperature': np.random.normal(310, 5, n_hdf),  # Surchauffe
-            'process_temperature': np.random.normal(320, 15, n_hdf),  # Surchauffe process
-            'rotational_speed': np.random.normal(1500, 100, n_hdf),
-            'torque': np.random.normal(40, 10, n_hdf),
-            'tool_wear': np.random.exponential(120, n_hdf),
-            'failure': [1] * n_hdf
+        # PRESSURE_LOSS - Perte de pression système
+        n_pressure_loss = n_failure // 4
+        pressure_loss_data = {
+            'temperature': np.random.normal(32.0, 4.0, n_pressure_loss),  # Température normale
+            'pressure': np.random.normal(0.8, 0.3, n_pressure_loss),      # Pression critique basse
+            'velocity': np.random.normal(0.3, 0.2, n_pressure_loss),      # Vitesse très réduite
+            'failure': [1] * n_pressure_loss
         }
         
-        # PWF - Power Failure
-        n_pwf = n_failure // 5
-        pwf_data = {
-            'air_temperature': np.random.normal(300, 2, n_pwf),
-            'process_temperature': np.random.normal(310, 8, n_pwf),
-            'rotational_speed': np.random.normal(1200, 200, n_pwf),  # Vitesse anormale
-            'torque': np.random.normal(60, 20, n_pwf),  # Couple excessif
-            'tool_wear': np.random.exponential(100, n_pwf),
-            'failure': [1] * n_pwf
+        # MECHANICAL_WEAR - Usure mécanique excessive
+        n_mechanical_wear = n_failure // 4
+        mechanical_wear_data = {
+            'temperature': np.random.normal(45.0, 6.0, n_mechanical_wear), # Température élevée par friction
+            'pressure': np.random.normal(2.1, 0.4, n_mechanical_wear),     # Pression faible
+            'velocity': np.random.normal(0.2, 0.1, n_mechanical_wear),     # Vitesse très faible
+            'failure': [1] * n_mechanical_wear
         }
         
-        # OSF - Overstrain Failure
-        n_osf = n_failure // 5
-        osf_data = {
-            'air_temperature': np.random.normal(300, 3, n_osf),
-            'process_temperature': np.random.normal(315, 12, n_osf),
-            'rotational_speed': np.random.normal(1500, 100, n_osf),
-            'torque': np.random.normal(55, 18, n_osf),  # Surcontrainte
-            'tool_wear': np.random.normal(200, 60, n_osf),  # Usure accélérée
-            'failure': [1] * n_osf
+        # VIBRATION_EXCESS - Vibrations excessives
+        n_vibration = n_failure - n_overheating - n_pressure_loss - n_mechanical_wear
+        vibration_data = {
+            'temperature': np.random.normal(42.0, 5.0, n_vibration),       # Température élevée par vibrations
+            'pressure': np.random.normal(6.2, 1.0, n_vibration),           # Pression excessive
+            'velocity': np.random.normal(4.5, 0.8, n_vibration),           # Vitesse excessive
+            'failure': [1] * n_vibration
         }
         
-        # RNF - Random Failure (reste)
-        n_rnf = n_failure - n_twf - n_hdf - n_pwf - n_osf
-        rnf_data = {
-            'air_temperature': np.random.normal(300, 3, n_rnf),
-            'process_temperature': np.random.normal(310, 10, n_rnf),
-            'rotational_speed': np.random.normal(1500, 150, n_rnf),
-            'torque': np.random.normal(40, 15, n_rnf),
-            'tool_wear': np.random.exponential(150, n_rnf),
-            'failure': [1] * n_rnf
-        }
-        
-        # Combiner toutes les données
+        # Combiner toutes les données industrielles
         all_data = {}
         for key in normal_data.keys():
             all_data[key] = np.concatenate([
-                normal_data[key], twf_data[key], hdf_data[key], 
-                pwf_data[key], osf_data[key], rnf_data[key]
+                normal_data[key], overheating_data[key], pressure_loss_data[key], 
+                mechanical_wear_data[key], vibration_data[key]
             ])
         
         df = pd.DataFrame(all_data)
@@ -297,8 +277,25 @@ class SmartPredictiveEngine:
         if model_file.exists():
             with open(model_file, 'rb') as f:
                 data = pickle.load(f)
+                
+                # Vérifier la compatibilité des scalers avec les nouvelles features
+                scalers = data['scalers']
+                expected_features = len(self.feature_columns)
+                
+                # Tester la compatibilité avec un échantillon
+                if scalers and 'general' in scalers:
+                    test_scaler = scalers['general']
+                    if hasattr(test_scaler, 'n_features_in_'):
+                        actual_features = test_scaler.n_features_in_
+                        if actual_features != expected_features:
+                            logger.warning(f"⚠️ Incompatibilité détectée: scaler attend {actual_features} features, mais nous en avons {expected_features}")
+                            logger.info("🔄 Suppression des anciens modèles et réentraînement...")
+                            # Supprimer le fichier incompatible
+                            model_file.unlink()
+                            raise ValueError("Modèles incompatibles - réentraînement nécessaire")
+                
                 self.anomaly_detectors = data['detectors']
-                self.scalers = data['scalers']
+                self.scalers = scalers
                 self.performance_metrics = data.get('metrics', {})
         
         # Charger Prophet
@@ -383,50 +380,47 @@ class SmartPredictiveEngine:
             return self._rule_based_prediction(reading_data)
     
     def _classify_failure_type(self, reading_data: Dict[str, float], anomaly_score: float) -> Optional[str]:
-        """Classifie le type de panne probable basé sur les valeurs"""
+        """Classifie le type de panne industrielle probable basé sur les valeurs des capteurs"""
         if anomaly_score > -0.3:  # Pas assez anormal
             return None
             
-        # Analyser les déviations par rapport aux valeurs normales
-        air_temp = reading_data.get('air_temperature', 300)
-        process_temp = reading_data.get('process_temperature', 310)
-        speed = reading_data.get('rotational_speed', 1500)
-        torque = reading_data.get('torque', 40)
-        wear = reading_data.get('tool_wear', 100)
+        # Analyser les déviations par rapport aux valeurs normales industrielles
+        temperature = reading_data.get('temperature', 30.0)
+        pressure = reading_data.get('pressure', 3.0)
+        velocity = reading_data.get('velocity', 1.5)
         
-        # Scores pour chaque type de panne
+        # Scores pour chaque type de panne industrielle
         scores = {}
         
-        # TWF - Tool Wear Failure
-        scores['TWF'] = 0
-        if wear > 200: scores['TWF'] += 3
-        if torque > 45: scores['TWF'] += 2
-        if wear > 250: scores['TWF'] += 2
+        # OVERHEATING - Surchauffe des équipements
+        scores['OVERHEATING'] = 0
+        if temperature > 50: scores['OVERHEATING'] += 4
+        if temperature > 60: scores['OVERHEATING'] += 3
+        if velocity < 1.0: scores['OVERHEATING'] += 2  # Performance réduite par chaleur
         
-        # HDF - Heat Dissipation Failure
-        scores['HDF'] = 0
-        if air_temp > 305: scores['HDF'] += 3
-        if process_temp > 315: scores['HDF'] += 3
-        if process_temp - air_temp > 20: scores['HDF'] += 2
+        # PRESSURE_LOSS - Perte de pression système
+        scores['PRESSURE_LOSS'] = 0
+        if pressure < 1.5: scores['PRESSURE_LOSS'] += 4
+        if pressure < 1.0: scores['PRESSURE_LOSS'] += 3
+        if velocity < 0.5: scores['PRESSURE_LOSS'] += 2  # Performance réduite par manque de pression
         
-        # PWF - Power Failure
-        scores['PWF'] = 0
-        if torque > 55: scores['PWF'] += 3
-        if speed < 1200 or speed > 1800: scores['PWF'] += 2
-        power = torque * speed
-        if power > 75000 or power < 30000: scores['PWF'] += 2
+        # MECHANICAL_WEAR - Usure mécanique excessive
+        scores['MECHANICAL_WEAR'] = 0
+        if velocity < 0.5: scores['MECHANICAL_WEAR'] += 4
+        if temperature > 40: scores['MECHANICAL_WEAR'] += 2  # Friction génère chaleur
+        if pressure < 2.0: scores['MECHANICAL_WEAR'] += 2   # Performance dégradée
         
-        # OSF - Overstrain Failure
-        scores['OSF'] = 0
-        if torque > 50: scores['OSF'] += 2
-        if wear > 180: scores['OSF'] += 2
-        if torque > 55 and wear > 200: scores['OSF'] += 3
+        # VIBRATION_EXCESS - Vibrations excessives
+        scores['VIBRATION_EXCESS'] = 0
+        if velocity > 4.0: scores['VIBRATION_EXCESS'] += 4
+        if pressure > 6.0: scores['VIBRATION_EXCESS'] += 3
+        if temperature > 40: scores['VIBRATION_EXCESS'] += 2  # Surchauffe par vibrations
         
-        # Retourner le type avec le score le plus élevé
+        # Retourner le type industriel avec le score le plus élevé
         if max(scores.values()) >= 3:
             return max(scores.keys(), key=lambda k: scores[k])
         
-        return 'RNF'  # Random failure si rien de spécifique
+        return 'SYSTEM_DEGRADATION'  # Dégradation générale si rien de spécifique
     
     def predict_future_trend(self, reading_data: Dict[str, float], 
                            hours_ahead: int = 2) -> Dict[str, Any]:
@@ -524,37 +518,47 @@ class SmartPredictiveEngine:
         return max(int(time_remaining), 1)
     
     def _rule_based_prediction(self, reading_data: Dict[str, float]) -> Dict[str, Any]:
-        """Fallback vers les règles expertes si ML échoue"""
-        # Implémentation simplifiée des règles expertes
-        air_temp = reading_data.get('air_temperature', 300)
-        process_temp = reading_data.get('process_temperature', 310)
-        torque = reading_data.get('torque', 40)
-        wear = reading_data.get('tool_wear', 100)
+        """Fallback vers les règles expertes industrielles si ML échoue"""
+        # Implémentation simplifiée des règles expertes industrielles
+        temperature = reading_data.get('temperature', 30.0)
+        pressure = reading_data.get('pressure', 3.0)
+        velocity = reading_data.get('velocity', 1.5)
         
         score = 0.0
         failure_type = None
         
-        # Règles simples
-        if wear > 200: 
+        # Règles expertes industrielles
+        if temperature > 60: 
+            score += 0.5
+            failure_type = 'OVERHEATING'
+        elif temperature > 45:
+            score += 0.3
+            failure_type = 'OVERHEATING'
+            
+        if pressure < 1.0:
             score += 0.4
-            failure_type = 'TWF'
-        if air_temp > 305:
+            failure_type = 'PRESSURE_LOSS'
+        elif pressure > 7.0:
             score += 0.3
-            failure_type = 'HDF'
-        if torque > 50:
+            failure_type = 'VIBRATION_EXCESS'
+            
+        if velocity < 0.3:
+            score += 0.4
+            failure_type = 'MECHANICAL_WEAR'
+        elif velocity > 4.5:
             score += 0.3
-            failure_type = 'OSF'
+            failure_type = 'VIBRATION_EXCESS'
         
-        status = 'critical' if score > 0.8 else ('warning' if score > 0.5 else 'normal')
+        status = 'critical' if score > 0.7 else ('warning' if score > 0.4 else ('alert' if score > 0.15 else 'normal'))
         
         return {
             'predicted_status': status,
-            'failure_probability': score,
+            'failure_probability': min(score, 1.0),
             'anomaly_score': -score,  # Simuler un score d'anomalie
-            'is_anomaly': score > 0.5,
+            'is_anomaly': score > 0.4,
             'failure_type': failure_type,
             'confidence': 0.7,
-            'model_type': 'RuleBased',
+            'model_type': 'RuleBased_Industrial',
             'time_to_failure': self._estimate_time_to_failure(score, failure_type)
         }
     

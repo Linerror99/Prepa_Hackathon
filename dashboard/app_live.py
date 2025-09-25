@@ -173,8 +173,8 @@ def main():
             
             with col2:
                 if machines:
-                    avg_temp = np.mean([m.get("air_temperature", 0) for m in machines.values()])
-                    st.metric("🌡️ Temp. Moyenne", f"{avg_temp:.1f}K")
+                    avg_temp = np.mean([m.get("temperature", 0) for m in machines.values()])
+                    st.metric("🌡️ Temp. Moyenne", f"{avg_temp:.1f}°C")
                 else:
                     st.metric("🌡️ Temp. Moyenne", "N/A")
             
@@ -200,13 +200,13 @@ def main():
                     col1, col2, col3 = st.columns(3)
                     
                     with col1:
-                        # Gauge température
-                        temp = machine_data.get("air_temperature", 300)
+                        # Gauge température industrielle
+                        temp = machine_data.get("temperature", 30)
                         fig_temp = go.Figure(go.Indicator(
                             mode = "gauge+number+delta",
                             value = temp,
                             domain = {'x': [0, 1], 'y': [0, 1]},
-                            title = {'text': "🌡️ Température Air (K)"},
+                            title = {'text': "🌡️ Température (°C)"},
                             gauge = {
                                 'axis': {'range': [290, 320]},
                                 'bar': {'color': "darkblue"},
@@ -223,28 +223,28 @@ def main():
                             }
                         ))
                         fig_temp.update_layout(height=250)
-                        st.plotly_chart(fig_temp, use_container_width=True)
+                        st.plotly_chart(fig_temp, use_container_width=True, key=f"temp_gauge_{machine_id}")
                     
                     with col2:
-                        # Gauge vitesse
-                        speed = machine_data.get("rotational_speed", 1500)
-                        fig_speed = go.Figure(go.Indicator(
+                        # Gauge pression
+                        pressure = machine_data.get("pressure", 5.0)
+                        fig_pressure = go.Figure(go.Indicator(
                             mode = "gauge+number",
-                            value = speed,
+                            value = pressure,
                             domain = {'x': [0, 1], 'y': [0, 1]},
-                            title = {'text': "⚙️ Vitesse (rpm)"},
+                            title = {'text': "📊 Pression (bar)"},
                             gauge = {
-                                'axis': {'range': [1000, 2000]},
-                                'bar': {'color': "green"},
+                                'axis': {'range': [0, 12]},
+                                'bar': {'color': "blue"},
                                 'steps': [
-                                    {'range': [1000, 1400], 'color': "lightgray"},
-                                    {'range': [1400, 1700], 'color': "yellow"},
-                                    {'range': [1700, 2000], 'color': "red"}
+                                    {'range': [0, 4], 'color': "lightgray"},
+                                    {'range': [4, 8], 'color': "yellow"},
+                                    {'range': [8, 12], 'color': "red"}
                                 ]
                             }
                         ))
-                        fig_speed.update_layout(height=250)
-                        st.plotly_chart(fig_speed, use_container_width=True)
+                        fig_pressure.update_layout(height=250)
+                        st.plotly_chart(fig_pressure, use_container_width=True, key=f"pressure_gauge_{machine_id}")
                     
                     with col3:
                         # Métriques machine
@@ -258,9 +258,9 @@ def main():
                         else:
                             st.error(f"🚨 État: {status.upper()}")
                         
-                        st.metric("🔧 Couple", f"{machine_data.get('torque', 0):.1f} Nm")
-                        st.metric("🔪 Usure Outil", f"{machine_data.get('tool_wear', 0):.1f}")
-                        st.metric("📦 Produit", machine_data.get('product_type', 'N/A'))
+                        st.metric("🌡️ Température", f"{machine_data.get('temperature', 0):.1f} °C")
+                        st.metric("� Pression", f"{machine_data.get('pressure', 0):.1f} bar")
+                        st.metric("🏃 Vitesse", f"{machine_data.get('velocity', 0):.1f} m/s")
                         
                         # Timestamp
                         timestamp = machine_data.get('timestamp', '')

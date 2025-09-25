@@ -37,14 +37,12 @@ logger = logging.getLogger(__name__)
 # ===== MODÈLES DE DONNÉES =====
 
 class SensorReading(BaseModel):
-    """Modèle pour une lecture de capteur"""
+    """Modèle pour une lecture de capteur industriel"""
     machine_id: str
     timestamp: str
-    air_temperature: float
-    process_temperature: float
-    rotational_speed: float
-    torque: float
-    tool_wear: float
+    temperature: float      # Température en °C
+    pressure: float         # Pression en bar
+    velocity: float         # Vitesse en m/s
     product_type: str
     status: str = "normal"
     predicted_failure_probability: float = 0.0
@@ -209,13 +207,11 @@ class PredictiveAIEngine:
     def predict_failure(self, reading: SensorReading) -> Dict[str, Any]:
         """Interface de compatibilité - utilise le nouveau moteur ML"""
         
-        # Convertir SensorReading en dictionnaire pour le nouveau moteur
+        # Convertir SensorReading en dictionnaire pour le moteur industriel
         reading_data = {
-            'air_temperature': reading.air_temperature,
-            'process_temperature': reading.process_temperature,
-            'rotational_speed': reading.rotational_speed,
-            'torque': reading.torque,
-            'tool_wear': reading.tool_wear
+            'temperature': reading.temperature,
+            'pressure': reading.pressure,
+            'velocity': reading.velocity
         }
         
         # Utiliser le nouveau moteur ML
@@ -632,19 +628,33 @@ async def get_live_machines_data():
         for machine_id in data_manager.machines_data.keys():
             status = data_manager.get_machine_status(machine_id)
             if status and status.last_reading:
+                # Obtenir la prédiction IA en temps réel pour cette machine
+                try:
+                    ai_prediction = ai_engine.predict_failure(status.last_reading)
+                except Exception as e:
+                    logger.error(f"Erreur prédiction IA pour {machine_id}: {e}")
+                    ai_prediction = {
+                        "predicted_status": "unknown",
+                        "failure_probability": 0.0,
+                        "failure_type": None,
+                        "confidence": 0.0
+                    }
+                
                 machines_data[machine_id] = {
                     "machine_id": machine_id,
                     "timestamp": status.last_reading.timestamp,
-                    "air_temperature": status.last_reading.air_temperature,
-                    "process_temperature": status.last_reading.process_temperature,
-                    "rotational_speed": status.last_reading.rotational_speed,
-                    "torque": status.last_reading.torque,
-                    "tool_wear": status.last_reading.tool_wear,
+                    "temperature": status.last_reading.temperature,
+                    "pressure": status.last_reading.pressure,
+                    "velocity": status.last_reading.velocity,
                     "product_type": status.last_reading.product_type,
                     "status": status.status,
                     "predicted_failure_probability": status.last_reading.predicted_failure_probability,
                     "failure_type": status.last_reading.failure_type,
-                    "ai_prediction": {"source": "mqtt", "connected": True}
+                    "ai_prediction": {
+                        "source": "mqtt", 
+                        "connected": True,
+                        "prediction": ai_prediction
+                    }
                 }
         
         return {
