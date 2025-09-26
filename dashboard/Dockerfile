@@ -34,4 +34,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:8501/_stcore/health || exit 1
 
 # Commande de démarrage
-CMD ["streamlit", "run", "app_live.py", "--server.port=8501", "--server.address=0.0.0.0", "--server.headless=true", "--global.suppressDeprecationWarnings=true"]
+CMD ["streamlit", "run", "app_roles.py", "--server.port=8501", "--server.address=0.0.0.0", "--server.headless=true", "--global.suppressDeprecationWarnings=true"]

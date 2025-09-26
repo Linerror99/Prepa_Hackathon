@@ -1,0 +1,658 @@
+import streamlit as st
+import pandas as pd
+import numpy as np
+import plotly.graph_objects as go
+import plotly.express as px
+from datetime import datetime, timedelta
+import time
+import random
+import os
+
+# Fonction pour simuler la lecture des capteurs
+def read_sensor_data(machine_status):
+    """
+    Simule la lecture des capteurs en temps réel.
+    Dans un environnement réel, cette fonction serait remplacée par la vraie lecture des capteurs.
+    """
+    temp = np.random.normal(60, 5)
+    vib = np.random.normal(2, 0.5)
+    speed = np.random.normal(1500, 100)  # Vitesse en RPM
+
+    # Ajout des anomalies si nécessaire
+    if machine_status >= 1:
+        temp += 15 if machine_status == 2 else 8
+        vib += 3 if machine_status == 2 else 1.5
+        speed += 300 if machine_status == 2 else 150
+
+    return temp, vib, speed
+
+# Configuration de la page
+st.set_page_config(
+    page_title="IoT Predictive Maintenance Dashboard",
+    page_icon="🏭",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Données simulées pour la démonstration
+@st.cache_data
+def generate_mock_data():
+    machines = [
+        {"id": 1, "name": "Machine de Production A", "type": "Presse hydraulique"},
+        {"id": 2, "name": "Machine de Production B", "type": "Tour CNC"},
+        {"id": 3, "name": "Machine de Production C", "type": "Fraiseuse"},
+        {"id": 4, "name": "Machine de Production D", "type": "Robot de soudage"},
+        {"id": 5, "name": "Machine de Production E", "type": "Convoyeur"},
+    ]
+
+    # États possibles : 0=Vert (OK), 1=Orange (Attention), 2=Rouge (Critique)
+    for machine in machines:
+        machine["status"] = random.choice([0, 0, 0, 0, 1, 1, 2])  # Plus de chances d'avoir du vert
+        machine["confidence_score"] = round(random.uniform(0.7, 0.98), 3)
+        machine["anomaly_value"] = round(random.uniform(-2.5, 3.2), 2)
+        machine["last_maintenance"] = datetime.now() - timedelta(days=random.randint(1, 30))
+        machine["next_maintenance"] = datetime.now() + timedelta(days=random.randint(1, 15))
+
+    return machines
+
+def get_status_color(status):
+    colors = {0: "#28a745", 1: "#ffc107", 2: "#dc3545"}  # Vert, Orange, Rouge
+    return colors[status]
+
+def get_status_text(status):
+    texts = {0: "NORMAL", 1: "ATTENTION", 2: "CRITIQUE"}
+    return texts[status]
+
+def get_status_emoji(status):
+    emojis = {0: "🟢", 1: "🟡", 2: "🔴"}
+    return emojis[status]
+
+# Interface principale
+def main():
+    # En-tête avec titre et logo
+    col_title, col_logo = st.columns([4, 1])
+
+    with col_title:
+        st.title("🏭Usine")
+
+    with col_logo:
+        # Affichage du logo JPG en haut à droite
+        logo_path = "picture.jpg"
+        if os.path.exists(logo_path):
+            st.image(logo_path, width=200)
+        else:
+            st.markdown("**Hackfinity**<br/>*IoT Solutions*", unsafe_allow_html=True)
+
+    # Sidebar pour sélection du rôle
+    st.sidebar.title("Sélection du rôle")
+    user_role = st.sidebar.selectbox(
+        "Choisissez votre rôle:",
+        ["Opérateur d'usine", "Team Leader", "Technicien de maintenance"]
+    )
+
+    machines = generate_mock_data()
+
+    if user_role == "Opérateur d'usine":
+        operator_interface(machines)
+    elif user_role == "Team Leader":
+        team_leader_interface(machines)
+    else:
+        maintenance_technician_interface(machines)
+
+def operator_interface(machines):
+
+
+    # Sélection de la machine
+    machine_names = [f"Machine {m['id']} - {m['name']}" for m in machines]
+    selected_machine_name = st.selectbox("Sélectionnez votre machine:", machine_names)
+    selected_machine_id = int(selected_machine_name.split()[1]) - 1
+    machine = machines[selected_machine_id]
+
+    # Affichage principal du voyant
+    col1, col2, col3 = st.columns([1, 2, 1])
+
+    with col2:
+        st.markdown("### État de votre machine")
+
+        # Voyant principal
+        status_color = get_status_color(machine["status"])
+        status_text = get_status_text(machine["status"])
+        status_emoji = get_status_emoji(machine["status"])
+
+        st.markdown(f"""
+        <div style="
+            text-align: center; 
+            padding: 50px; 
+            border: 5px solid {status_color}; 
+            border-radius: 20px; 
+            background-color: {status_color}20;
+            margin: 20px 0;
+        ">
+            <h1 style="color: {status_color}; margin: 0; font-size: 4em;">{status_emoji}</h1>
+            <h2 style="color: {status_color}; margin: 10px 0;">{status_text}</h2>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # Messages explicatifs
+    if machine["status"] == 0:
+        st.success("✅ **TOUT VA BIEN** - Votre machine fonctionne normalement")
+    elif machine["status"] == 1:
+        st.warning("⚠️ **ATTENTION** - Possibilité de panne dans le shift. Surveillez attentivement.")
+    else:
+        st.error("🚨 **PANNE IMMINENTE** - Arrêtez la machine et contactez immédiatement la maintenance!")
+
+
+def team_leader_interface(machines):
+    st.header("👨‍💼 Interface Team Leader")
+
+    # Initialiser le state pour la navigation
+    if 'selected_machine_details' not in st.session_state:
+        st.session_state.selected_machine_details = None
+
+    # Si une machine est sélectionnée, afficher ses détails en plein écran
+    if st.session_state.selected_machine_details is not None:
+        show_machine_details_fullscreen(st.session_state.selected_machine_details, machines)
+        return
+
+    # Vue d'ensemble des machines (affichage normal)
+    st.subheader("Vue d'ensemble de l'atelier")
+
+    # Statistiques générales
+    col1, col2, col3, col4 = st.columns(4)
+
+    normal_count = sum(1 for m in machines if m["status"] == 0)
+    attention_count = sum(1 for m in machines if m["status"] == 1)
+    critical_count = sum(1 for m in machines if m["status"] == 2)
+
+    with col1:
+        st.metric("Total machines", len(machines))
+    with col2:
+        st.metric("Machines OK", normal_count, delta=None, delta_color="normal")
+    with col3:
+        st.metric("Machines en attention", attention_count, delta=None, delta_color="off")
+    with col4:
+        st.metric("Machines critiques", critical_count, delta=None, delta_color="inverse")
+
+    # Notifications
+    if critical_count > 0:
+        st.error(f"🚨 **ALERTE CRITIQUE** - {critical_count} machine(s) nécessite(nt) une intervention immédiate!")
+    if attention_count > 0:
+        st.warning(f"⚠️ **ATTENTION** - {attention_count} machine(s) à surveiller de près")
+
+    # Grille des machines
+    st.subheader("État des machines")
+
+    cols = st.columns(3)
+    for i, machine in enumerate(machines):
+        with cols[i % 3]:
+            status_color = get_status_color(machine["status"])
+            status_emoji = get_status_emoji(machine["status"])
+
+            with st.container():
+                st.markdown(f"""
+                <div style="
+                    border: 2px solid {status_color}; 
+                    border-radius: 10px; 
+                    padding: 15px; 
+                    margin: 10px 0;
+                    background-color: {status_color}10;
+                ">
+                    <h4 style="margin: 0; color: {status_color};">
+                        {status_emoji} Machine {machine['id']}
+                    </h4>
+                    <p style="margin: 5px 0; font-size: 0.9em;">
+                        {machine['name']}
+                    </p>
+                </div>
+                """, unsafe_allow_html=True)
+
+                if st.button(f"Détails Machine {machine['id']}", key=f"btn_{machine['id']}"):
+                    st.session_state.selected_machine_details = machine['id']
+                    st.rerun()
+
+
+
+def show_machine_details_fullscreen(machine_id, machines):
+    """Affiche les détails d'une machine en plein écran pour le Team Leader"""
+    # Trouver la machine correspondante
+    machine = next((m for m in machines if m['id'] == machine_id), None)
+    if not machine:
+        st.error("Machine introuvable")
+        return
+
+    # Bouton de retour en haut à gauche
+    col_back, col_title = st.columns([1, 6])
+    with col_back:
+        if st.button("← Retour", key="back_to_overview"):
+            st.session_state.selected_machine_details = None
+            st.rerun()
+
+    with col_title:
+        st.title(f"🔍 Détails - {machine['name']}")
+
+    st.divider()
+
+    # Section 1: État général de la machine
+    st.subheader("📊 État Général")
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    status_color = get_status_color(machine["status"])
+    status_text = get_status_text(machine["status"])
+    status_emoji = get_status_emoji(machine["status"])
+
+    with col1:
+        st.markdown(f"""
+        <div style="text-align: center; padding: 20px; border: 3px solid {status_color}; 
+                    border-radius: 15px; background-color: {status_color}20;">
+            <h2 style="color: {status_color}; margin: 0;">{status_emoji}</h2>
+            <h3 style="color: {status_color}; margin: 5px 0;">{status_text}</h3>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col2:
+        st.metric("Score de pertinence", f"{machine['confidence_score']*100:.1f}%",
+                 delta=f"{(machine['confidence_score']*100-85):.1f}%")
+
+    with col3:
+        st.metric("Valeur d'anomalie", f"{machine['anomaly_value']:.2f}",
+                 delta=f"{machine['anomaly_value']:.2f}")
+
+    with col4:
+        st.metric("Type de machine", machine["type"])
+
+    st.divider()
+
+    # Section 2: Informations de maintenance
+    st.subheader("🔧 Informations de Maintenance")
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.metric("Dernière maintenance", machine["last_maintenance"].strftime("%d/%m/%Y"),
+                 delta=f"{(datetime.now() - machine['last_maintenance']).days} jours")
+
+    with col2:
+        st.metric("Prochaine maintenance", machine["next_maintenance"].strftime("%d/%m/%Y"),
+                 delta=f"{(machine['next_maintenance'] - datetime.now()).days} jours")
+
+    with col3:
+        days_until_maintenance = (machine["next_maintenance"] - datetime.now()).days
+        maintenance_status = "🟢 OK" if days_until_maintenance > 7 else "🟡 Proche" if days_until_maintenance > 3 else "🔴 Urgent"
+        st.metric("Statut maintenance", maintenance_status)
+
+    st.divider()
+
+    # Section 3: Graphiques en temps réel
+    st.subheader("📊 Surveillance en Temps Réel")
+
+    # Auto-refresh pour les graphiques
+    placeholder = st.empty()
+
+    # Génération de données temps réel
+    current_time = datetime.now()
+    times = pd.date_range(end=current_time, periods=60, freq='S')  # 60 dernières secondes
+
+    # Initialisation des données dans le state de session si nécessaire
+    if 'real_time_data' not in st.session_state:
+        st.session_state.real_time_data = {
+            'temp_values': [],
+            'vib_values': [],
+            'speed_values': [],
+            'timestamps': []
+        }
+
+    # Mise à jour des données en temps réel
+    current_time = datetime.now()
+    if len(st.session_state.real_time_data['timestamps']) == 0 or \
+       (current_time - st.session_state.real_time_data['timestamps'][-1]).seconds >= 1:
+        
+        # Lecture des capteurs (simulée)
+        new_temp, new_vib, new_speed = read_sensor_data(machine["status"])
+
+        # Mise à jour des données
+        st.session_state.real_time_data['temp_values'].append(new_temp)
+        st.session_state.real_time_data['vib_values'].append(new_vib)
+        st.session_state.real_time_data['speed_values'].append(new_speed)
+        st.session_state.real_time_data['timestamps'].append(current_time)
+
+        # Garder uniquement les 60 dernières secondes
+        if len(st.session_state.real_time_data['timestamps']) > 60:
+            for key in st.session_state.real_time_data:
+                st.session_state.real_time_data[key] = st.session_state.real_time_data[key][-60:]
+
+    times = st.session_state.real_time_data['timestamps']
+    temp_values = st.session_state.real_time_data['temp_values']
+    vib_values = st.session_state.real_time_data['vib_values']
+    speed_values = st.session_state.real_time_data['speed_values']
+
+    # Conteneur pour l'actualisation automatique
+    with placeholder.container():
+        # Mise en page des graphiques
+        graph_col1, graph_col2 = st.columns(2)
+
+        # Création d'un placeholder pour l'heure de mise à jour
+        update_time = st.empty()
+        update_time.text(f"Dernière mise à jour : {datetime.now().strftime('%H:%M:%S')}")
+
+        # Graphique 1: Température
+        with graph_col1:
+            fig_temp = go.Figure()
+            fig_temp.add_trace(go.Scatter(
+                x=times, y=temp_values,
+                mode='lines',
+                name='Température',
+                line=dict(color='#ff6b6b', width=2)
+            ))
+            fig_temp.add_hline(y=75, line_dash="dash", line_color="#dc3545",
+                              annotation_text="Seuil critique")
+            fig_temp.add_hline(y=65, line_dash="dash", line_color="#ffc107",
+                              annotation_text="Seuil attention")
+
+            fig_temp.update_layout(
+                title="Température en Temps Réel",
+                xaxis_title="Heure",
+                yaxis_title="Température (°C)",
+                height=300,
+                showlegend=False,
+                hovermode='x unified'
+            )
+            st.plotly_chart(fig_temp, use_container_width=True)
+
+        # Graphique 2: Vibrations
+        with graph_col2:
+            fig_vib = go.Figure()
+            fig_vib.add_trace(go.Scatter(
+                x=times, y=vib_values,
+                mode='lines',
+                name='Vibrations',
+                line=dict(color='#4ecdc4', width=2)
+            ))
+            fig_vib.add_hline(y=5, line_dash="dash", line_color="#dc3545",
+                             annotation_text="Seuil critique")
+            fig_vib.add_hline(y=3.5, line_dash="dash", line_color="#ffc107",
+                             annotation_text="Seuil attention")
+
+            fig_vib.update_layout(
+                title="Vibrations en Temps Réel",
+                xaxis_title="Heure",
+                yaxis_title="Amplitude (mm/s)",
+                height=300,
+                showlegend=False,
+                hovermode='x unified'
+            )
+            st.plotly_chart(fig_vib, use_container_width=True)
+
+        # Graphique 3: Vitesse de rotation (pleine largeur)
+        fig_speed = go.Figure()
+        fig_speed.add_trace(go.Scatter(
+            x=times, y=speed_values,
+            mode='lines',
+            name='Vitesse',
+            line=dict(color='#45b7d1', width=2)
+        ))
+        fig_speed.add_hline(y=1800, line_dash="dash", line_color="#dc3545",
+                         annotation_text="Seuil critique")
+        fig_speed.add_hline(y=1650, line_dash="dash", line_color="#ffc107",
+                         annotation_text="Seuil attention")
+
+        fig_speed.update_layout(
+            title="Vitesse de Rotation en Temps Réel",
+            xaxis_title="Heure",
+            yaxis_title="Vitesse (RPM)",
+            height=250,
+            showlegend=False,
+            hovermode='x unified'
+        )
+        st.plotly_chart(fig_speed, use_container_width=True)
+
+    # Auto-refresh toutes les 2 secondes
+    time.sleep(2)
+    st.rerun()
+
+    # Section 4: Analyse des Anomalies
+    st.subheader("🔍 Analyse des Anomalies")
+    
+    analysis_col1, analysis_col2 = st.columns(2)
+
+    with analysis_col1:
+        st.markdown("**Paramètres Critiques Détectés:**")
+        if machine["status"] == 2:
+            st.error("🌡️ **Température**: +15°C au-dessus de la normale")
+            st.error("📳 **Vibrations**: Amplitude 3x supérieure")
+            st.error("⚙️ **Vitesse**: +300 RPM au-dessus de la normale")
+            st.markdown("**Cause probable**: Défaillance des roulements et surchauffe")
+        elif machine["status"] == 1:
+            st.warning("🌡️ **Température**: +8°C au-dessus de la normale")
+            st.warning("📳 **Vibrations**: Amplitude 1.5x supérieure")
+            st.warning("⚙️ **Vitesse**: +150 RPM au-dessus de la normale")
+            st.markdown("**Cause probable**: Usure des composants mécaniques")
+        else:
+            st.success("✅ Tous les paramètres sont dans les normes")
+            st.markdown("**État**: Fonctionnement optimal")
+
+    with analysis_col2:
+        st.markdown("**Tendances et Prédictions:**")
+        if machine["status"] == 2:
+            failure_hours = random.uniform(2, 8)
+            st.error(f"⚠️ **Risque de panne dans {failure_hours:.1f}h**")
+            st.error(f"🎯 **Probabilité de défaillance: {machine['confidence_score']*100:.0f}%**")
+            st.markdown("""
+            **Actions recommandées:**
+            1. Arrêt immédiat pour maintenance
+            2. Inspection des roulements
+            3. Vérification du système de refroidissement
+            """)
+        elif machine["status"] == 1:
+            st.warning(f"⚠️ **Dégradation progressive détectée**")
+            st.warning(f"🎯 **Probabilité d'anomalie: {machine['confidence_score']*100:.0f}%**")
+            st.markdown("""
+            **Actions recommandées:**
+            1. Planifier une inspection
+            2. Surveillance accrue
+            3. Préparer intervention préventive
+            """)
+        else:
+            st.success("✅ Aucune anomalie détectée")
+            next_maintenance = random.randint(15, 30)
+            st.info(f"🔧 Prochaine maintenance préventive dans {next_maintenance} jours")
+
+    st.divider()
+
+    # Section 4: Actions et recommandations
+    st.subheader("⚡ Actions et Recommandations")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("**Actions immédiates:**")
+        if machine["status"] == 2:
+            st.error("""
+            🚨 **INTERVENTION URGENTE**
+            - Arrêter la machine immédiatement
+            - Contacter l'équipe de maintenance
+            - Isoler la zone de travail
+            """)
+        elif machine["status"] == 1:
+            st.warning("""
+            ⚠️ **SURVEILLANCE RENFORCÉE**
+            - Augmenter la fréquence de contrôle
+            - Planifier une inspection
+            - Préparer l'équipe d'intervention
+            """)
+        else:
+            st.success("""
+            ✅ **FONCTIONNEMENT NORMAL**
+            - Continuer la surveillance standard
+            - Maintenance selon planning
+            """)
+
+    with col2:
+        st.markdown("**Prédictions et risques:**")
+
+        if machine["status"] == 2:
+            failure_hours = random.uniform(2, 8)
+            st.error(f"⏰ **Panne prédite dans {failure_hours:.1f}h**")
+            st.error(f"🎯 **Probabilité: {machine['confidence_score']*100:.0f}%**")
+        elif machine["status"] == 1:
+            failure_days = random.uniform(1, 5)
+            st.warning(f"📅 **Surveillance requise {failure_days:.1f} jours**")
+            st.warning(f"🎯 **Probabilité: {machine['confidence_score']*100:.0f}%**")
+        else:
+            next_check_days = random.uniform(7, 14)
+            st.success(f"📅 **Prochain contrôle dans {next_check_days:.0f} jours**")
+
+    st.divider()
+
+
+
+def maintenance_technician_interface(machines):
+    st.header("🔧 Interface Technicien de Maintenance")
+
+    # Sélection de la machine à analyser
+    machine_names = [f"Machine {m['id']} - {m['name']}" for m in machines]
+    selected_machine_name = st.selectbox("Sélectionnez la machine à analyser:", machine_names)
+    selected_machine_id = int(selected_machine_name.split()[1]) - 1
+    machine = machines[selected_machine_id]
+
+    # Onglets pour différentes analyses
+    tab1, tab2, tab3, tab4 = st.tabs(["📊 Historique", "🔍 Analyse Détaillée", "📋 Rapport", "🛠️ Actions"])
+
+    with tab1:
+        st.subheader("Historique des anomalies")
+
+        # Génération de données historiques
+        dates = pd.date_range(start=datetime.now()-timedelta(days=30), end=datetime.now(), freq='D')
+
+        # Simulation de différents capteurs
+        sensors = ['Température', 'Vibration', 'Pression', 'Courant']
+        sensor_colors = ['#ff6b6b', '#4ecdc4', '#45b7d1', '#96ceb4']  # Couleurs distinctes pour chaque capteur
+
+        for i, sensor in enumerate(sensors):
+            values = np.random.normal(0, 1, len(dates))
+            if machine["status"] >= 1 and sensor in ['Température', 'Vibration']:
+                values[-7:] += np.linspace(0, 2 if machine["status"] == 2 else 1, 7)
+
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=dates,
+                y=values,
+                mode='lines+markers',
+                name=sensor,
+                line=dict(color=sensor_colors[i], width=2),
+                marker=dict(color=sensor_colors[i], size=4)
+            ))
+
+            # Utiliser les couleurs cohérentes du dashboard
+            fig.add_hline(y=2, line_dash="dash", line_color="#dc3545",
+                         annotation_text="Seuil critique", annotation_position="bottom right")
+            fig.add_hline(y=1, line_dash="dash", line_color="#ffc107",
+                         annotation_text="Seuil attention", annotation_position="bottom right")
+            fig.add_hline(y=0, line_dash="dot", line_color="#28a745",
+                         annotation_text="Valeur normale", annotation_position="bottom right")
+
+            # Zones colorées cohérentes
+            fig.add_hrect(y0=2, y1=max(values.max() + 0.5, 3),
+                         fillcolor="#dc3545", opacity=0.1, line_width=0)
+            fig.add_hrect(y0=1, y1=2,
+                         fillcolor="#ffc107", opacity=0.1, line_width=0)
+            fig.add_hrect(y0=-3, y1=1,
+                         fillcolor="#28a745", opacity=0.05, line_width=0)
+
+            fig.update_layout(
+                title=f"Historique - {sensor}",
+                height=300,
+                showlegend=True,
+                hovermode='x unified'
+            )
+
+            st.plotly_chart(fig, use_container_width=True)
+
+    with tab2:
+        st.subheader("Analyse détaillée de l'anomalie")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("**Données problématiques identifiées:**")
+            if machine["status"] == 2:
+                st.error("🌡️ **Température**: +15°C par rapport à la normale")
+                st.error("📳 **Vibration**: Amplitude 3x supérieure")
+                st.warning("⚡ **Courant**: Pic à 120% de la capacité")
+            elif machine["status"] == 1:
+                st.warning("🌡️ **Température**: +8°C par rapport à la normale")
+                st.info("📳 **Vibration**: Légère augmentation détectée")
+            else:
+                st.success("✅ Tous les paramètres dans les normes")
+
+        with col2:
+            st.markdown("**Écarts par rapport à la réalité:**")
+            st.metric("Température", f"{machine['anomaly_value']:.1f}°C", f"{machine['anomaly_value']:.1f}")
+            st.metric("Vibration", f"{abs(machine['anomaly_value']*0.5):.1f}mm/s", f"{machine['anomaly_value']*0.5:.1f}")
+            st.metric("Score de confiance", f"{machine['confidence_score']*100:.1f}%")
+
+    with tab3:
+        st.subheader("Rapport de maintenance")
+
+        # Historique des interventions
+        st.markdown("**Historique des interventions:**")
+        interventions = [
+            {"date": datetime.now() - timedelta(days=5), "type": "Préventive", "technicien": "Jean Dupont", "durée": "2h"},
+            {"date": datetime.now() - timedelta(days=15), "type": "Corrective", "technicien": "Marie Martin", "durée": "4h"},
+            {"date": datetime.now() - timedelta(days=28), "type": "Préventive", "technicien": "Pierre Durand", "durée": "1h30"},
+        ]
+
+        for intervention in interventions:
+            st.write(f"📅 {intervention['date'].strftime('%d/%m/%Y')} - {intervention['type']} par {intervention['technicien']} ({intervention['durée']})")
+
+        # Pièces et consommables
+        st.markdown("**Pièces et consommables:**")
+        st.write("🔧 Roulements: Changement prévu dans 15 jours")
+        st.write("🛢️ Huile hydraulique: Niveau OK")
+        st.write("🔌 Capteurs: Fonctionnels")
+
+    with tab4:
+        st.subheader("Actions recommandées")
+
+        if machine["status"] == 2:
+            st.error("🚨 **INTERVENTION IMMÉDIATE REQUISE**")
+            st.markdown("""
+            **Actions à effectuer:**
+            1. Arrêter immédiatement la machine
+            2. Vérifier le système de refroidissement
+            3. Contrôler les roulements et la lubrification
+            4. Mesurer les vibrations avec équipement calibré
+            5. Remplacer les pièces défectueuses si nécessaire
+            """)
+
+            if st.button("🚨 Créer ticket d'intervention urgente"):
+                st.success("Ticket d'intervention urgent créé - Réf: URG-" + str(random.randint(1000, 9999)))
+
+        elif machine["status"] == 1:
+            st.warning("⚠️ **SURVEILLANCE RENFORCÉE**")
+            st.markdown("""
+            **Actions recommandées:**
+            1. Augmenter la fréquence de contrôle
+            2. Vérifier les paramètres de fonctionnement
+            3. Planifier une maintenance préventive
+            4. Surveiller l'évolution des anomalies
+            """)
+
+            if st.button("📋 Planifier maintenance préventive"):
+                st.success("Maintenance préventive programmée pour dans 3 jours")
+
+        else:
+            st.success("✅ **MACHINE EN BON ÉTAT**")
+            st.markdown("Maintenance préventive selon planning habituel")
+
+        # Boutons d'action communs
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("📧 Envoyer rapport"):
+                st.info("Rapport envoyé au responsable maintenance")
+        with col2:
+            if st.button("📱 Notifier équipe"):
+                st.info("Équipe notifiée de l'état de la machine")
+
+if __name__ == "__main__":
+    main()
