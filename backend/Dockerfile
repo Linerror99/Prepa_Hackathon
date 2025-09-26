@@ -16,6 +16,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copier le code source
 COPY . .
 
+# Rendre l'entrypoint exécutable
+RUN chmod +x /app/entrypoint.sh
+
 # Variables d'environnement
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
@@ -25,9 +28,9 @@ ENV REDIS_URL=redis://redis:6379
 # Port d'exposition
 EXPOSE 8000
 
-# Healthcheck
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+# Healthcheck avec délai plus long pour l'entraînement
+HEALTHCHECK --interval=45s --timeout=15s --start-period=60s --retries=5 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Commande de démarrage
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+# Entrypoint qui lance ML + FastAPI
+ENTRYPOINT ["/app/entrypoint.sh"]

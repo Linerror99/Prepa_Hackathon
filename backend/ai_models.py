@@ -1,7 +1,8 @@
 """
-Modèles IA pour la maintenance prédictive - Isolation Forest + Prophet
+Modèles IA pour la maintenance prédictive - ML réel + Simulation
 Phase 1: Détection d'anomalies en temps réel
 Phase 2: Prédiction temporelle des pannes futures
+Phase 3: ML temps réel avec TSForecaster (NEW!)
 """
 
 import pandas as pd
@@ -26,6 +27,14 @@ except ImportError:
     PROPHET_AVAILABLE = False
     logging.warning("Prophet non disponible - Phase 2 désactivée")
 
+# Phase 3: ML temps réel (NEW!)
+try:
+    from ml.forecast_inference import TSForecaster, create_forecaster
+    ML_FORECASTER_AVAILABLE = True
+except ImportError:
+    ML_FORECASTER_AVAILABLE = False
+    logging.warning("TSForecaster non disponible - ML temps réel désactivé")
+
 logger = logging.getLogger(__name__)
 
 class SmartPredictiveEngine:
@@ -36,10 +45,10 @@ class SmartPredictiveEngine:
     Phase 2 (Avancé): Prophet pour prédire les pannes futures dans le temps
     """
     
-    def __init__(self, data_path: str = "/app/data"):
+    def __init__(self, data_path: str = "data"):
         self.data_path = Path(data_path)
         self.models_path = self.data_path / "models"
-        self.models_path.mkdir(exist_ok=True)
+        self.models_path.mkdir(parents=True, exist_ok=True)
         
         # Phase 1: Détection d'anomalies industrielles
         self.anomaly_detectors = {}  # Un détecteur par type de panne
@@ -578,3 +587,377 @@ class SmartPredictiveEngine:
             'performance': self.performance_metrics,
             'last_training': self.performance_metrics.get('last_training', 'Never')
         }
+
+
+# ============================================================================
+# NOUVELLE CLASSE ML ENGINE - UTILISE VOTRE VRAI MODÈLE ML
+# ============================================================================
+
+class MLPredictiveEngine:
+    """
+    Moteur ML utilisant le vrai modèle TSForecaster entraîné sur vos données client
+    
+    Remplace SmartPredictiveEngine pour les machines avec vraie ML
+    - Prédictions temps réel avec GradientBoosting
+    - Détection d'anomalies avec IsolationForest 
+    - Features engineering avancé (lags + rolling stats)
+    """
+    
+    def __init__(self, machine_id: str = "MACHINE_01"):
+        self.machine_id = machine_id
+        self.forecaster = None
+        self.initialization_status = "not_started"
+        
+        # Métriques de performance (initialiser AVANT _initialize_forecaster)
+        self.performance_metrics = {
+            'total_predictions': 0,
+            'anomalies_detected': 0,
+            'model_accuracy': 0.0,
+            'last_prediction': None
+        }
+        
+        logger.info(f"🚀 Initialisation MLPredictiveEngine pour {machine_id}")
+        
+        # Initialiser le forecaster
+        self._initialize_forecaster()
+    
+    def _initialize_forecaster(self):
+        """Initialise le TSForecaster avec gestion d'erreurs"""
+        try:
+            if ML_FORECASTER_AVAILABLE:
+                self.forecaster = create_forecaster("ml/models")
+                if self.forecaster:
+                    self.initialization_status = "success"
+                    model_info = self.forecaster.get_model_info()
+                    logger.info(f"✅ MLPredictiveEngine initialisé:")
+                    logger.info(f"   - Modèle: {model_info.get('performance', {}).get('model_type', 'Unknown')}")
+                    logger.info(f"   - R² Test: {model_info.get('performance', {}).get('test', {}).get('r2', 'N/A')}")
+                    logger.info(f"   - Features: {model_info.get('n_features', 'N/A')}")
+                    
+                    # Mise à jour des métriques
+                    perf = model_info.get('performance', {}).get('test', {})
+                    self.performance_metrics['model_accuracy'] = perf.get('r2', 0.0)
+                else:
+                    raise Exception("create_forecaster returned None")
+            else:
+                raise Exception("ML_FORECASTER_AVAILABLE is False")
+                
+        except Exception as e:
+            logger.error(f"❌ Erreur initialisation MLPredictiveEngine: {e}")
+            logger.info("🔄 Fallback vers simulation pour cette machine")
+            self.initialization_status = "failed"
+            self.forecaster = None
+    
+    def predict_anomaly(self, reading_data: Dict[str, float]) -> Dict[str, Any]:
+        """
+        Prédiction d'anomalie avec le vrai modèle ML
+        
+        Args:
+            reading_data: {"temperature": float, "pression": float, "vitesse": float}
+            
+        Returns:
+            Résultat de prédiction avec score d'anomalie ML
+        """
+        try:
+            if not self.forecaster:
+                return self._fallback_prediction(reading_data, "forecaster_not_available")
+            
+            # Conversion des noms de colonnes
+            ml_data = {
+                'temperature': reading_data.get('temperature', 25.0),
+                'pression': reading_data.get('pressure', 3.0),  # pressure -> pression
+                'vitesse': reading_data.get('velocity', 1.5) * 1000  # velocity -> vitesse (RPM)
+            }
+            
+            # Prédiction ML
+            result = self.forecaster.predict(ml_data)
+            
+            if not result.get('ok', False):
+                reason = result.get('reason', 'unknown_error')
+                logger.warning(f"⚠️ ML prediction failed: {reason}")
+                return self._fallback_prediction(reading_data, reason)
+            
+            # Extraire les résultats ML
+            predictions = result.get('predictions', {})
+            anomaly_info = result.get('anomaly', {})
+            confidence_info = result.get('confidence', {})
+            
+            # Score d'anomalie du modèle ML
+            anomaly_score = anomaly_info.get('score', 0.0)
+            is_anomaly = anomaly_info.get('is_anomaly', False)
+            
+            # Convertir le score ML en probabilité de panne [0,1]
+            # Score négatif = plus anormal
+            failure_probability = max(0, min(1, (-anomaly_score + 0.1) / 0.5))
+            
+            # Classification basée sur le score ML
+            if anomaly_score < -0.3:
+                status = "critical"
+                confidence = 0.95
+            elif anomaly_score < -0.1:
+                status = "warning"  
+                confidence = 0.85
+            elif anomaly_score < -0.05:
+                status = "alert"
+                confidence = 0.75
+            else:
+                status = "normal"
+                confidence = 0.90
+            
+            # Type de panne basé sur les prédictions ML
+            failure_type = self._classify_failure_from_ml(ml_data, predictions, anomaly_score)
+            
+            # Temps estimé avant panne
+            time_to_failure = self._estimate_ml_time_to_failure(
+                failure_probability, failure_type, predictions
+            )
+            
+            # Mise à jour des métriques
+            self.performance_metrics['total_predictions'] += 1
+            if is_anomaly:
+                self.performance_metrics['anomalies_detected'] += 1
+            self.performance_metrics['last_prediction'] = datetime.now().isoformat()
+            
+            return {
+                'predicted_status': status,
+                'failure_probability': failure_probability,
+                'anomaly_score': float(anomaly_score),
+                'is_anomaly': is_anomaly,
+                'failure_type': failure_type,
+                'confidence': confidence,
+                'model_type': 'MLPredictiveEngine_TSForecaster',
+                'time_to_failure': time_to_failure,
+                'ml_predictions': predictions,  # Prédictions futures ML
+                'model_accuracy': confidence_info.get('test_r2', 0.0),
+                'buffer_size': confidence_info.get('buffer_size', 0)
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur MLPredictiveEngine.predict_anomaly: {e}")
+            return self._fallback_prediction(reading_data, f"exception: {str(e)}")
+    
+    def predict_future_trend(self, reading_data: Dict[str, float], 
+                           hours_ahead: int = 2) -> Dict[str, Any]:
+        """
+        Prédiction temporelle avec le modèle ML (multi-steps)
+        
+        Args:
+            reading_data: Données actuelles des capteurs
+            hours_ahead: Nombre d'heures à prédire dans le futur
+            
+        Returns:
+            Prédictions temporelles ML multi-pas
+        """
+        try:
+            if not self.forecaster:
+                return {'status': 'unavailable', 'reason': 'MLForecaster not available'}
+            
+            # Conversion des données
+            ml_data = {
+                'temperature': reading_data.get('temperature', 25.0),
+                'pression': reading_data.get('pressure', 3.0),
+                'vitesse': reading_data.get('velocity', 1.5) * 1000
+            }
+            
+            # Calculer le nombre de pas (toutes les 15 minutes)
+            steps_ahead = max(1, hours_ahead * 4)
+            
+            # Prédiction multi-pas avec ML
+            result = self.forecaster.forecast(ml_data, steps_ahead)
+            
+            if not result.get('ok', False):
+                return {'status': 'error', 'reason': result.get('reason', 'unknown')}
+            
+            forecasts = result.get('forecasts', [])
+            
+            # Formater les résultats pour l'API
+            predictions = {}
+            current_time = datetime.now()
+            
+            # Créer les timestamps
+            timestamps = [
+                current_time + timedelta(minutes=15*i) 
+                for i in range(1, len(forecasts) + 1)
+            ]
+            
+            # Organiser par feature ML
+            for feature in ['temperature', 'pression', 'vitesse']:
+                pred_key = f"pred_{feature}"
+                if forecasts and pred_key in forecasts[0]:
+                    values = [f[pred_key] for f in forecasts]
+                    
+                    # Convertir vitesse de RPM vers m/s pour l'API
+                    if feature == 'vitesse':
+                        values = [v / 1000 for v in values]  # RPM -> m/s
+                    
+                    predictions[feature] = {
+                        'timestamps': [t.isoformat() for t in timestamps],
+                        'values': values,
+                        # Ajouter incertitude basée sur la performance ML
+                        'lower_bound': [v * 0.95 for v in values],
+                        'upper_bound': [v * 1.05 for v in values]
+                    }
+                    
+                    # Détecter tendances critiques
+                    current_value = ml_data[feature]
+                    if feature == 'vitesse':
+                        current_value /= 1000  # RPM -> m/s
+                    
+                    time_to_critical = self._find_ml_time_to_threshold(
+                        timestamps, values, feature, current_value
+                    )
+                    if time_to_critical:
+                        predictions[feature]['time_to_critical'] = time_to_critical
+            
+            return {
+                'status': 'success',
+                'predictions': predictions,
+                'model_type': 'MLPredictiveEngine_TSForecaster_Forecast',
+                'prediction_horizon_hours': hours_ahead,
+                'steps_predicted': len(forecasts),
+                'model_accuracy': self.performance_metrics['model_accuracy']
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur MLPredictiveEngine.predict_future_trend: {e}")
+            return {'status': 'error', 'reason': str(e)}
+    
+    def _classify_failure_from_ml(self, input_data: Dict[str, float], 
+                                 predictions: Dict[str, float], 
+                                 anomaly_score: float) -> Optional[str]:
+        """Classifie le type de panne basé sur les prédictions ML"""
+        if anomaly_score > -0.1:  # Pas assez anormal selon ML
+            return None
+        
+        # Analyser les prédictions ML
+        pred_temp = predictions.get('pred_temperature', input_data['temperature'])
+        pred_pression = predictions.get('pred_pression', input_data['pression'])
+        pred_vitesse = predictions.get('pred_vitesse', input_data['vitesse'])
+        
+        # Déviations par rapport aux prédictions ML
+        temp_dev = abs(pred_temp - input_data['temperature']) / input_data['temperature']
+        pression_dev = abs(pred_pression - input_data['pression']) / input_data['pression']
+        vitesse_dev = abs(pred_vitesse - input_data['vitesse']) / input_data['vitesse']
+        
+        # Scores ML pour chaque type de panne
+        scores = {}
+        
+        # Classification basée sur les patterns ML
+        scores['ML_TEMPERATURE_ANOMALY'] = temp_dev * 10 if pred_temp > 50 else 0
+        scores['ML_PRESSURE_ANOMALY'] = pression_dev * 10 if pred_pression < 2.0 else 0
+        scores['ML_VELOCITY_ANOMALY'] = vitesse_dev * 10 if pred_vitesse < 500 or pred_vitesse > 2000 else 0
+        scores['ML_SYSTEM_DEGRADATION'] = (temp_dev + pression_dev + vitesse_dev) * 3
+        
+        # Retourner le type ML avec le score le plus élevé
+        if max(scores.values()) >= 2:
+            return max(scores.keys(), key=lambda k: scores[k])
+        
+        return 'ML_UNKNOWN_PATTERN'
+    
+    def _estimate_ml_time_to_failure(self, probability: float, 
+                                   failure_type: Optional[str], 
+                                   predictions: Dict[str, float]) -> Optional[int]:
+        """Estime le temps avant panne basé sur les prédictions ML"""
+        if probability < 0.6:
+            return None
+        
+        # Temps de base par type ML (en heures)
+        base_times = {
+            'ML_TEMPERATURE_ANOMALY': 24,  # Surchauffe détectée par ML
+            'ML_PRESSURE_ANOMALY': 48,     # Problème pression selon ML
+            'ML_VELOCITY_ANOMALY': 12,     # Problème vitesse selon ML
+            'ML_SYSTEM_DEGRADATION': 72,   # Dégradation générale ML
+            'ML_UNKNOWN_PATTERN': 36       # Pattern inconnu
+        }
+        
+        base_time = base_times.get(failure_type, 48)
+        
+        # Ajuster basé sur la performance ML
+        ml_confidence = self.performance_metrics.get('model_accuracy', 0.5)
+        
+        # Plus le modèle est précis et la probabilité élevée, moins il reste de temps
+        time_remaining = base_time * (1 - probability) * (0.5 + ml_confidence * 0.5)
+        
+        return max(int(time_remaining), 1)
+    
+    def _find_ml_time_to_threshold(self, timestamps: List[datetime], 
+                                 values: List[float], feature: str, 
+                                 current_value: float) -> Optional[str]:
+        """Trouve quand une prédiction ML atteindra un seuil critique"""
+        # Seuils critiques par feature ML
+        thresholds = {
+            'temperature': 60.0,  # °C
+            'pression': 1.0,      # bar (seuil bas)
+            'vitesse': 0.3        # m/s (seuil bas)
+        }
+        
+        threshold = thresholds.get(feature)
+        if not threshold:
+            return None
+        
+        # Pour pression et vitesse, on cherche quand ça descend en dessous
+        # Pour température, on cherche quand ça monte au-dessus
+        for time, value in zip(timestamps, values):
+            if feature == 'temperature':
+                if value >= threshold and current_value < threshold:
+                    return time.isoformat()
+            else:  # pression, vitesse
+                if value <= threshold and current_value > threshold:
+                    return time.isoformat()
+        
+        return None
+    
+    def _fallback_prediction(self, reading_data: Dict[str, float], 
+                           reason: str) -> Dict[str, Any]:
+        """Prédiction de fallback si ML échoue"""
+        logger.warning(f"⚠️ Fallback prediction activated: {reason}")
+        
+        # Règles simples basées sur les seuils industriels
+        temperature = reading_data.get('temperature', 25.0)
+        pressure = reading_data.get('pressure', 3.0)
+        velocity = reading_data.get('velocity', 1.5)
+        
+        score = 0.0
+        if temperature > 55: score += 0.6
+        elif temperature > 45: score += 0.3
+        
+        if pressure < 1.5: score += 0.5
+        elif pressure > 6.0: score += 0.4
+        
+        if velocity < 0.5: score += 0.5
+        elif velocity > 4.0: score += 0.4
+        
+        status = 'critical' if score > 0.8 else ('warning' if score > 0.5 else ('alert' if score > 0.2 else 'normal'))
+        
+        return {
+            'predicted_status': status,
+            'failure_probability': min(score, 1.0),
+            'anomaly_score': -score,
+            'is_anomaly': score > 0.5,
+            'failure_type': 'FALLBACK_RULES',
+            'confidence': 0.6,
+            'model_type': 'Fallback_RuleBased',
+            'time_to_failure': int((1 - score) * 48) if score > 0.5 else None,
+            'fallback_reason': reason
+        }
+    
+    def get_model_info(self) -> Dict[str, Any]:
+        """Retourne les informations sur le modèle ML"""
+        base_info = {
+            'machine_id': self.machine_id,
+            'model_type': 'MLPredictiveEngine_TSForecaster',
+            'initialization_status': self.initialization_status,
+            'ml_forecaster_available': ML_FORECASTER_AVAILABLE,
+            'performance': self.performance_metrics
+        }
+        
+        if self.forecaster:
+            ml_info = self.forecaster.get_model_info()
+            base_info.update({
+                'ml_model_info': ml_info,
+                'features': ml_info.get('target_cols', []),
+                'n_features': ml_info.get('n_features', 0),
+                'buffer_size': ml_info.get('buffer_size', 0)
+            })
+        
+        return base_info

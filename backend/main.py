@@ -26,7 +26,7 @@ import random
 from pathlib import Path
 
 # Import de notre nouvelle IA
-from ai_models import SmartPredictiveEngine
+from ai_models import SmartPredictiveEngine, MLPredictiveEngine
 # Import de la persistance SQLite
 from persist_data import init_db, save_reading, save_alert, get_recent_readings, get_active_alerts, get_machines_status, get_stats
 
@@ -198,26 +198,38 @@ class MQTTManager:
 # ===== MOTEUR IA PRÉDICTIF =====
 
 class PredictiveAIEngine:
-    """Moteur d'IA pour la maintenance prédictive - REMPLACÉ par SmartPredictiveEngine"""
+    """Moteur d'IA hybride - ML réel + Simulation"""
     
     def __init__(self):
+        # MACHINE_01 utilise le vrai ML
+        self.ml_engine = MLPredictiveEngine("MACHINE_01")
+        
+        # Autres machines utilisent la simulation
         self.smart_engine = SmartPredictiveEngine()
-        logger.info("🤖 Nouveau moteur IA Smart initialisé avec ML")
+        
+        logger.info("🤖 Moteur IA hybride initialisé:")
+        logger.info("   - MACHINE_01: ML réel (TSForecaster)")
+        logger.info("   - Autres machines: Simulation avancée")
     
     def predict_failure(self, reading: SensorReading) -> Dict[str, Any]:
-        """Interface de compatibilité - utilise le nouveau moteur ML"""
+        """Routage intelligent ML vs Simulation selon la machine"""
         
-        # Convertir SensorReading en dictionnaire pour le moteur industriel
+        # Convertir SensorReading en dictionnaire
         reading_data = {
             'temperature': reading.temperature,
             'pressure': reading.pressure,
             'velocity': reading.velocity
         }
         
-        # Utiliser le nouveau moteur ML
-        prediction = self.smart_engine.predict_anomaly(reading_data)
+        # ROUTING: MACHINE_01 → ML réel, autres → simulation
+        if reading.machine_id == "MACHINE_01":
+            logger.info(f"🧠 ML prediction for {reading.machine_id}")
+            prediction = self.ml_engine.predict_anomaly(reading_data)
+        else:
+            logger.info(f"🎭 Simulation prediction for {reading.machine_id}")
+            prediction = self.smart_engine.predict_anomaly(reading_data)
         
-        # Compatibilité avec l'ancien format
+        # Format de sortie uniforme
         return {
             'predicted_status': prediction['predicted_status'],
             'failure_probability': prediction['failure_probability'],
@@ -227,14 +239,25 @@ class PredictiveAIEngine:
             'time_to_failure': prediction['time_to_failure'],
             'model_info': {
                 'type': prediction['model_type'],
-                'is_ml': True,
-                'anomaly_score': prediction['anomaly_score']
+                'is_ml': reading.machine_id == "MACHINE_01",
+                'machine_id': reading.machine_id,
+                'anomaly_score': prediction['anomaly_score'],
+                'ml_predictions': prediction.get('ml_predictions', {}),
+                'buffer_size': prediction.get('buffer_size', 0)
             }
         }
     
     def get_model_status(self) -> Dict[str, Any]:
-        """Retourne l'état des modèles ML"""
-        return self.smart_engine.get_model_info()
+        """Retourne l'état des modèles ML et simulation"""
+        return {
+            'ml_engine_machine_01': self.ml_engine.get_model_info(),
+            'simulation_engine_other_machines': self.smart_engine.get_model_info(),
+            'routing': {
+                'MACHINE_01': 'MLPredictiveEngine (Real ML)',
+                'MACHINE_02': 'SmartPredictiveEngine (Simulation)',
+                'MACHINE_03': 'SmartPredictiveEngine (Simulation)'
+            }
+        }
 
 # ===== GESTIONNAIRE DE DONNÉES =====
 
@@ -687,11 +710,57 @@ async def get_ai_models_status():
 
 @app.post("/ai/predict")
 async def predict_machine_failure(reading: SensorReading):
-    """Test de prédiction IA sur une lecture donnée"""
+    """Test de prédiction IA avec routage ML/Simulation"""
     prediction = ai_engine.predict_failure(reading)
+    
+    # Ajouter des infos sur le type de modèle utilisé
+    model_type = "ML_Real" if reading.machine_id == "MACHINE_01" else "Simulation"
+    
     return {
         "reading": reading.dict(),
         "prediction": prediction,
+        "model_used": model_type,
+        "machine_id": reading.machine_id,
+        "timestamp": datetime.now().isoformat()
+    }
+
+@app.get("/ai/model-info")
+async def get_ai_model_info():
+    """Informations sur les modèles ML et simulation"""
+    return ai_engine.get_model_status()
+
+@app.post("/ai/ml-test")
+async def test_ml_engine(
+    temperature: float = 45.0,
+    pressure: float = 3.2,  
+    velocity: float = 1.8
+):
+    """Test direct du moteur ML pour MACHINE_01"""
+    # Créer une lecture test pour MACHINE_01
+    test_reading = SensorReading(
+        machine_id="MACHINE_01",
+        timestamp=datetime.now().isoformat(),
+        temperature=temperature,
+        pressure=pressure,
+        velocity=velocity,
+        product_type="test"
+    )
+    
+    # Prédiction ML directe
+    ml_prediction = ai_engine.ml_engine.predict_anomaly({
+        'temperature': temperature,
+        'pressure': pressure,
+        'velocity': velocity
+    })
+    
+    return {
+        "test_input": {
+            "temperature": temperature,
+            "pressure": pressure, 
+            "velocity": velocity
+        },
+        "ml_prediction": ml_prediction,
+        "model_info": ai_engine.ml_engine.get_model_info(),
         "timestamp": datetime.now().isoformat()
     }
 

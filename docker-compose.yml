@@ -16,7 +16,7 @@ services:
       retries: 5
       start_period: 30s
 
-  # Backend API
+  # Backend API avec ML intégré
   backend:
     build:
       context: ./backend
@@ -26,17 +26,23 @@ services:
       - "8000:8000"
     environment:
       - MQTT_BROKER=mosquitto
+      - REDIS_URL=redis://redis:6379
+      - ML_MODELS_PATH=/app/ml/models
     depends_on:
       mosquitto:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     volumes:
       - ./data:/app/data
+      - ml_models:/app/ml/models  # Volume pour persister les modèles ML
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
+      interval: 45s
+      timeout: 15s
       retries: 5
+      start_period: 90s  # Plus long pour l'entraînement ML
 
   # Dashboard Temps Réel
   dashboard:
@@ -53,6 +59,19 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # Redis pour cache et sessions
+  redis:
+    image: redis:7-alpine
+    container_name: iot-redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   # Simulateur IoT
   simulator:
     build:
@@ -64,9 +83,8 @@ services:
     depends_on:
       mosquitto:
         condition: service_healthy
-    volumes:
-      - ./data:/app/data
-    restart: unless-stopped
 
 volumes:
+  ml_models:
+    driver: local
   data_volume:

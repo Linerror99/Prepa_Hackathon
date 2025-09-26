@@ -1,0 +1,71 @@
+{
+  "target_cols": [
+    "temperature",
+    "pression",
+    "vitesse"
+  ],
+  "feat_cols": [
+    "hour",
+    "day_of_week",
+    "minute",
+    "temperature_lag1",
+    "temperature_lag2",
+    "temperature_lag3",
+    "temperature_rollmean3",
+    "temperature_rollstd3",
+    "temperature_rollmax3",
+    "temperature_rollmin3",
+    "temperature_rollmean5",
+    "temperature_rollstd5",
+    "temperature_rollmax5",
+    "temperature_rollmin5",
+    "pression_lag1",
+    "pression_lag2",
+    "pression_lag3",
+    "pression_rollmean3",
+    "pression_rollstd3",
+    "pression_rollmax3",
+    "pression_rollmin3",
+    "pression_rollmean5",
+    "pression_rollstd5",
+    "pression_rollmax5",
+    "pression_rollmin5",
+    "vitesse_lag1",
+    "vitesse_lag2",
+    "vitesse_lag3",
+    "vitesse_rollmean3",
+    "vitesse_rollstd3",
+    "vitesse_rollmax3",
+    "vitesse_rollmin3",
+    "vitesse_rollmean5",
+    "vitesse_rollstd5",
+    "vitesse_rollmax5",
+    "vitesse_rollmin5",
+    "temp_pressure_ratio",
+    "temp_velocity_product"
+  ],
+  "n_features": 38,
+  "n_targets": 3,
+  "model_type": "GradientBoosting",
+  "train_samples": 73581,
+  "val_samples": 15767,
+  "test_samples": 15769,
+  "lags": 3,
+  "rolling_windows": [
+    3,
+    5
+  ],
+  "performance": {
+    "validation": {
+      "r2": 0.4673309991085564,
+      "mse": 1578.0195398544536,
+      "mae": 19.561599494830734
+    },
+    "test": {
+      "r2": 0.46499015416349376,
+      "mse": 1578.0133043803035,
+      "mae": 19.520138020965184
+    }
+  },
+  "feature_importance": {}
+}
