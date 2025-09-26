@@ -16,8 +16,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copier le code source
 COPY . .
 
-# Rendre l'entrypoint exécutable
-RUN chmod +x /app/entrypoint.sh
+# Créer le répertoire data avec les bonnes permissions
+RUN mkdir -p /app/data && chmod 777 /app/data
 
 # Variables d'environnement
 ENV PYTHONPATH=/app
@@ -32,5 +32,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=45s --timeout=15s --start-period=60s --retries=5 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Entrypoint qui lance ML + FastAPI
-ENTRYPOINT ["/app/entrypoint.sh"]
+# Script de démarrage intégré (évite les problèmes d'encodage)
+CMD ["sh", "-c", "echo '🚀 Container Backend IoT + ML Startup' && python startup_train_ml.py && echo '🎯 Démarrage FastAPI...' && uvicorn main:app --host 0.0.0.0 --port 8000"]
