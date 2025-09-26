@@ -53,7 +53,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  # Simulateur IoT
+  # Simulateur IoT (Original - UCI Dataset)
   simulator:
     build:
       context: ./simulator
@@ -67,6 +67,56 @@ services:
     volumes:
       - ./data:/app/data
     restart: unless-stopped
+    profiles:
+      - simulation  # Optionnel - activer avec --profile simulation
+
+  # Pipeline Capteurs Industriels - Agrégateur principal
+  sensor-aggregator:
+    build:
+      context: ./sensor_pipeline
+      dockerfile: Dockerfile
+    container_name: sensor-aggregator
+    environment:
+      - MQTT_HOST=mosquitto
+      - MQTT_PORT=1883
+      - AGGREGATION_TOLERANCE=1
+      - SENSOR_COMPONENT=aggregator
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import paho.mqtt.client as mqtt; c = mqtt.Client(); c.connect('mosquitto', 1883, 10); c.disconnect()"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  # Simulateur Capteurs Industriels Réels (Optionnel)
+  sensor-simulator:
+    build:
+      context: ./sensor_pipeline
+      dockerfile: Dockerfile
+    container_name: sensor-simulator
+    environment:
+      - MQTT_HOST=mosquitto
+      - MQTT_PORT=1883
+      - SENSOR_COMPONENT=simulator
+      - SENSOR_INTERVAL_SECONDS=30  # 30 secondes pour données continues
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles:
+      - sensor-sim  # Optionnel - activer avec --profile sensor-sim
+    healthcheck:
+      test: ["CMD", "python", "-c", "import paho.mqtt.client as mqtt; c = mqtt.Client(); c.connect('mosquitto', 1883, 10); c.disconnect()"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
 
 volumes:
   data_volume:

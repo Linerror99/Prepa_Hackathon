@@ -13,7 +13,7 @@ COPY . .
 ENV PYTHONUNBUFFERED=1
 ENV MQTT_BROKER=mosquitto
 ENV NUM_MACHINES=3
-ENV READING_INTERVAL=2.0
+ENV READING_INTERVAL=300.0
 
-# Commande par défaut (corrigée)
-CMD ["python", "machine_simulator.py", "--machines", "3", "--interval", "2.0", "--mqtt-broker", "mosquitto"]
+# Commande par défaut (corrigée pour 5 minutes)
+CMD ["python", "machine_simulator.py", "--machines", "3", "--interval", "300.0", "--mqtt-broker", "mosquitto"]

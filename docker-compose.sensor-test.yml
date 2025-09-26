@@ -1,0 +1,72 @@
+version: '3.8'
+
+# Configuration Docker Compose pour tests du pipeline capteurs
+# Usage: docker-compose -f docker-compose.sensor-test.yml up
+
+services:
+  # Broker MQTT pour tests
+  mosquitto-test:
+    image: eclipse-mosquitto:2.0
+    container_name: mqtt-test
+    ports:
+      - "1884:1883"  # Port différent pour éviter les conflits
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf
+    restart: "no"
+    healthcheck:
+      test: ["CMD", "mosquitto_pub", "-h", "localhost", "-t", "healthcheck", "-m", "test"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+  # Agrégateur de capteurs
+  sensor-aggregator-test:
+    build:
+      context: ./sensor_pipeline
+      dockerfile: Dockerfile
+    container_name: sensor-aggregator-test
+    environment:
+      - MQTT_HOST=mosquitto-test
+      - MQTT_PORT=1883
+      - AGGREGATION_TOLERANCE=1
+      - SENSOR_COMPONENT=aggregator
+    depends_on:
+      mosquitto-test:
+        condition: service_healthy
+    restart: "no"
+
+  # Simulateur de capteurs
+  sensor-simulator-test:
+    build:
+      context: ./sensor_pipeline
+      dockerfile: Dockerfile
+    container_name: sensor-simulator-test
+    environment:
+      - MQTT_HOST=mosquitto-test
+      - MQTT_PORT=1883
+      - SENSOR_COMPONENT=simulator
+    depends_on:
+      mosquitto-test:
+        condition: service_healthy
+    restart: "no"
+
+  # Tests de validation
+  sensor-tests:
+    build:
+      context: ./sensor_pipeline
+      dockerfile: Dockerfile
+    container_name: sensor-tests
+    environment:
+      - MQTT_HOST=mosquitto-test
+      - MQTT_PORT=1883
+      - SENSOR_COMPONENT=test
+    depends_on:
+      mosquitto-test:
+        condition: service_healthy
+      sensor-aggregator-test:
+        condition: service_started
+    restart: "no"
+
+networks:
+  default:
+    name: sensor-test-network

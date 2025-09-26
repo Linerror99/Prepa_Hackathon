@@ -149,8 +149,21 @@ def operator_interface(machines):
 
     # Sélection de la machine
     machine_names = [f"{m['id']} - {m['name']}" for m in machines]
-    selected_machine_name = st.selectbox("Sélectionnez votre machine:", machine_names)
-    selected_machine_id = selected_machine_name.split()[0]
+    if not machine_names:
+        st.warning("⏳ Aucune machine disponible. En attente de données...")
+        return
+        
+    selected_machine_name = st.selectbox("Sélectionnez votre machine:", machine_names, index=0 if machine_names else None)
+    if not selected_machine_name:
+        st.warning("⏳ Veuillez sélectionner une machine")
+        return
+    
+    # Protection contre None
+    try:
+        selected_machine_id = selected_machine_name.split()[0]
+    except (AttributeError, IndexError):
+        st.error("❌ Erreur sélection machine")
+        return
     machine = next((m for m in machines if m["id"] == selected_machine_id), None)
 
     if not machine:
@@ -506,7 +519,17 @@ def maintenance_technician_interface(machines):
 
     # Sélection de la machine à analyser
     machine_names = [f"{m['id']} - {m['name']}" for m in machines]
+    
+    if not machine_names:
+        st.warning("⚠️ Aucune machine disponible. Vérifiez la connexion au backend.")
+        return
+    
     selected_machine_name = st.selectbox("Sélectionnez la machine à analyser:", machine_names)
+    
+    if not selected_machine_name:
+        st.warning("⚠️ Veuillez sélectionner une machine.")
+        return
+        
     selected_machine_id = selected_machine_name.split()[0] 
     machine = next((m for m in machines if m["id"] == selected_machine_id), None)
 
