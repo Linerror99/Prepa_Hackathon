@@ -120,7 +120,8 @@ class MachineSimulator:
             severity='HIGH',
             description=scenario_data['description'],
             initial_conditions=self.current_state.copy(),
-            progression_pattern=progression
+            progression_pattern=progression,
+            duration_minutes=2  # Durée réduite à 2 minutes pour tests rapides
         )
         
         self.scenario_start_time = datetime.now()
@@ -213,7 +214,7 @@ class MachineSimulator:
     def _update_normal_state(self) -> None:
         """Met à jour l'état normal avec évolution naturelle industrielle"""
         # Évolution naturelle des paramètres industriels
-        self.operating_hours += 5/60  # 5 minutes en heures
+        self.operating_hours += 15/3600  # 15 secondes en heures
         
         # Légères variations normales autour des valeurs de consigne
         for param in ['temperature', 'pressure', 'velocity']:
@@ -472,8 +473,8 @@ class IoTSimulator:
     
     def _trigger_random_failures(self) -> None:
         """Déclenche aléatoirement des scénarios de panne industrielle"""
-        # 2% de chance par cycle de déclencher une panne sur une machine (plus fréquent avec les intervalles de 5min)
-        if random.random() < 0.02:
+        # 10% de chance par cycle de déclencher une panne sur une machine (fréquent pour tests rapides)
+        if random.random() < 0.10:
             # Choisir une machine au hasard qui n'a pas déjà de scénario actif
             available_machines = [m for m in self.machines if m.current_scenario is None]
             
@@ -508,7 +509,7 @@ def main():
     parser = argparse.ArgumentParser(description="Simulateur IoT industriel basé sur données réelles")
     parser.add_argument("--machines", type=int, default=3, help="Nombre de machines à simuler")
     parser.add_argument("--duration", type=int, help="Durée en minutes (infini si non spécifié)")
-    parser.add_argument("--interval", type=float, default=300.0, help="Intervalle entre lectures industrielles (secondes) - défaut 5 minutes")
+    parser.add_argument("--interval", type=float, default=15.0, help="Intervalle entre lectures industrielles (secondes) - défaut 15 secondes")
     parser.add_argument("--mqtt-broker", default=os.getenv("MQTT_BROKER", "localhost"), help="Adresse du broker MQTT")
     parser.add_argument("--mqtt-port", type=int, default=1883, help="Port du broker MQTT")
     

@@ -61,6 +61,8 @@ services:
     container_name: iot-simulator
     environment:
       - MQTT_BROKER=mosquitto
+      - READING_INTERVAL=15  # Intervalle rapide de 15 secondes
+    command: ["python", "machine_simulator.py", "--interval", "15"]
     depends_on:
       mosquitto:
         condition: service_healthy
