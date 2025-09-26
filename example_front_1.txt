@@ -34,8 +34,17 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# Initialiser le state pour l'auto-refresh
+if 'last_update' not in st.session_state:
+    st.session_state.last_update = datetime.now()
+if 'auto_refresh_counter' not in st.session_state:
+    st.session_state.auto_refresh_counter = 0
+
+# Mise à jour du compteur auto-refresh
+st.session_state.auto_refresh_counter += 1
+
 # Données simulées pour la démonstration
-@st.cache_data
+@st.cache_data(ttl=3)  # Cache réduit à 3 secondes pour des changements plus fréquents
 def generate_mock_data():
     machines = [
         {"id": 1, "name": "Machine de Production A", "type": "Presse hydraulique"},
@@ -47,11 +56,21 @@ def generate_mock_data():
 
     # États possibles : 0=Vert (OK), 1=Orange (Attention), 2=Rouge (Critique)
     for machine in machines:
-        machine["status"] = random.choice([0, 0, 0, 0, 1, 1, 2])  # Plus de chances d'avoir du vert
+        # Simulation d'évolution des états en temps réel plus dynamique
+        current_time = datetime.now()
+        # Change toutes les 5 secondes au lieu de 10 pour plus de dynamisme
+        seed = int(current_time.timestamp() / 5) + machine["id"]
+        random.seed(seed)
+
+        # Plus de variabilité dans les états pour voir les changements
+        machine["status"] = random.choice([0, 0, 1, 1, 2])  # Distribution plus équilibrée
         machine["confidence_score"] = round(random.uniform(0.7, 0.98), 3)
         machine["anomaly_value"] = round(random.uniform(-2.5, 3.2), 2)
         machine["last_maintenance"] = datetime.now() - timedelta(days=random.randint(1, 30))
         machine["next_maintenance"] = datetime.now() + timedelta(days=random.randint(1, 15))
+
+        # Reset du seed pour éviter que toutes les machines aient le même comportement
+        random.seed(None)
 
     return machines
 
@@ -100,13 +119,24 @@ def main():
         maintenance_technician_interface(machines)
 
 def operator_interface(machines):
-
-
     # Sélection de la machine
     machine_names = [f"Machine {m['id']} - {m['name']}" for m in machines]
     selected_machine_name = st.selectbox("Sélectionnez votre machine:", machine_names)
     selected_machine_id = int(selected_machine_name.split()[1]) - 1
     machine = machines[selected_machine_id]
+
+    # Container pour l'auto-refresh
+    status_container = st.empty()
+
+    # Indicateur temps réel avec auto-refresh
+    current_time = datetime.now()
+    st.markdown(f"""
+    <div style="text-align: right; font-size: 0.9em; color: #666; margin-bottom: 10px;">
+        🔄 Mise à jour: {current_time.strftime("%H:%M:%S")} | 
+        <span style="color: #28a745;">●</span> Auto-refresh actif ({st.session_state.auto_refresh_counter})
+        <br/><small>⚡ États changent toutes les 5 secondes</small>
+    </div>
+    """, unsafe_allow_html=True)
 
     # Affichage principal du voyant
     col1, col2, col3 = st.columns([1, 2, 1])
@@ -114,10 +144,13 @@ def operator_interface(machines):
     with col2:
         st.markdown("### État de votre machine")
 
-        # Voyant principal
+        # Voyant principal avec animation plus prononcée
         status_color = get_status_color(machine["status"])
         status_text = get_status_text(machine["status"])
         status_emoji = get_status_emoji(machine["status"])
+
+        # Animation différente selon l'état
+        animation = "pulse" if machine["status"] == 0 else "blink" if machine["status"] == 1 else "shake"
 
         st.markdown(f"""
         <div style="
@@ -127,20 +160,53 @@ def operator_interface(machines):
             border-radius: 20px; 
             background-color: {status_color}20;
             margin: 20px 0;
+            animation: {animation} 2s infinite;
+            box-shadow: 0 0 20px {status_color}40;
         ">
             <h1 style="color: {status_color}; margin: 0; font-size: 4em;">{status_emoji}</h1>
             <h2 style="color: {status_color}; margin: 10px 0;">{status_text}</h2>
+            <p style="color: {status_color}; margin: 5px 0; font-size: 0.8em;">
+                Dernière mise à jour: {current_time.strftime("%H:%M:%S")}
+            </p>
         </div>
+        <style>
+        @keyframes pulse {{
+            0% {{ opacity: 0.8; transform: scale(1); }}
+            50% {{ opacity: 1; transform: scale(1.02); }}
+            100% {{ opacity: 0.8; transform: scale(1); }}
+        }}
+        @keyframes blink {{
+            0% {{ opacity: 1; }}
+            50% {{ opacity: 0.6; }}
+            100% {{ opacity: 1; }}
+        }}
+        @keyframes shake {{
+            0%, 100% {{ transform: translateX(0); }}
+            25% {{ transform: translateX(-5px); }}
+            75% {{ transform: translateX(5px); }}
+        }}
+        </style>
         """, unsafe_allow_html=True)
 
-    # Messages explicatifs
+    # Messages explicatifs avec prédictions temps réel
     if machine["status"] == 0:
         st.success("✅ **TOUT VA BIEN** - Votre machine fonctionne normalement")
+        next_check = random.randint(7, 14)
+        st.info(f"🔧 Prochaine maintenance prédite dans {next_check} jours")
     elif machine["status"] == 1:
         st.warning("⚠️ **ATTENTION** - Possibilité de panne dans le shift. Surveillez attentivement.")
+        prediction_hours = random.uniform(8, 24)
+        st.warning(f"🎯 **Prédiction IA**: Risque de dégradation dans {prediction_hours:.1f}h")
     else:
         st.error("🚨 **PANNE IMMINENTE** - Arrêtez la machine et contactez immédiatement la maintenance!")
+        failure_time = random.uniform(0.5, 4)
+        st.error(f"🚨 **Prédiction critique**: Panne imminente dans {failure_time:.1f}h (Confiance: {machine['confidence_score']*100:.0f}%)")
 
+    # Auto-refresh automatique toutes les 3 secondes pour l'opérateur (plus fréquent)
+    if (current_time - st.session_state.last_update).seconds >= 3:
+        st.session_state.last_update = current_time
+        time.sleep(0.1)  # Petit délai pour éviter les conflits
+        st.rerun()
 
 def team_leader_interface(machines):
     st.header("👨‍💼 Interface Team Leader")
@@ -157,7 +223,17 @@ def team_leader_interface(machines):
     # Vue d'ensemble des machines (affichage normal)
     st.subheader("Vue d'ensemble de l'atelier")
 
-    # Statistiques générales
+    # Indicateur temps réel avec auto-refresh amélioré
+    current_time = datetime.now()
+    st.markdown(f"""
+    <div style="text-align: right; font-size: 0.9em; color: #666; margin-bottom: 10px;">
+        🔄 Mise à jour: {current_time.strftime("%H:%M:%S")} | 
+        <span style="color: #28a745;">●</span> Auto-refresh actif ({st.session_state.auto_refresh_counter})
+        <br/><small>⚡ États changent toutes les 5 secondes</small>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Statistiques générales avec animations
     col1, col2, col3, col4 = st.columns(4)
 
     normal_count = sum(1 for m in machines if m["status"] == 0)
@@ -167,19 +243,39 @@ def team_leader_interface(machines):
     with col1:
         st.metric("Total machines", len(machines))
     with col2:
-        st.metric("Machines OK", normal_count, delta=None, delta_color="normal")
+        delta_normal = random.randint(-1, 1) if normal_count > 0 else 0
+        st.metric("Machines OK", normal_count, delta=delta_normal, delta_color="normal")
     with col3:
-        st.metric("Machines en attention", attention_count, delta=None, delta_color="off")
+        delta_attention = random.randint(-1, 1) if attention_count > 0 else 0
+        st.metric("Machines en attention", attention_count, delta=delta_attention, delta_color="off")
     with col4:
-        st.metric("Machines critiques", critical_count, delta=None, delta_color="inverse")
+        delta_critical = random.randint(-1, 1) if critical_count > 0 else 0
+        st.metric("Machines critiques", critical_count, delta=delta_critical, delta_color="inverse")
 
-    # Notifications
+    # Notifications dynamiques avec sons visuels
     if critical_count > 0:
-        st.error(f"🚨 **ALERTE CRITIQUE** - {critical_count} machine(s) nécessite(nt) une intervention immédiate!")
+        st.markdown(f"""
+        <div style="
+            padding: 15px; 
+            background-color: #dc354520; 
+            border-left: 5px solid #dc3545; 
+            border-radius: 5px;
+            animation: flash 1s infinite;
+        ">
+            🚨 <strong>ALERTE CRITIQUE</strong> - {critical_count} machine(s) nécessite(nt) une intervention immédiate!
+        </div>
+        <style>
+        @keyframes flash {{
+            0%, 100% {{ background-color: #dc354520; }}
+            50% {{ background-color: #dc354540; }}
+        }}
+        </style>
+        """, unsafe_allow_html=True)
+
     if attention_count > 0:
         st.warning(f"⚠️ **ATTENTION** - {attention_count} machine(s) à surveiller de près")
 
-    # Grille des machines
+    # Grille des machines avec animations améliorées
     st.subheader("État des machines")
 
     cols = st.columns(3)
@@ -187,30 +283,83 @@ def team_leader_interface(machines):
         with cols[i % 3]:
             status_color = get_status_color(machine["status"])
             status_emoji = get_status_emoji(machine["status"])
+            status_text = get_status_text(machine["status"])
+
+            # Animation différente selon l'état
+            animation_class = ""
+            if machine["status"] == 2:
+                animation_class = "critical-blink"
+            elif machine["status"] == 1:
+                animation_class = "attention-pulse"
 
             with st.container():
                 st.markdown(f"""
-                <div style="
-                    border: 2px solid {status_color}; 
-                    border-radius: 10px; 
-                    padding: 15px; 
+                <div class="{animation_class}" style="
+                    border: 3px solid {status_color}; 
+                    border-radius: 15px; 
+                    padding: 20px; 
                     margin: 10px 0;
-                    background-color: {status_color}10;
+                    background-color: {status_color}15;
+                    transition: all 0.3s ease;
+                    box-shadow: 0 2px 10px {status_color}30;
                 ">
-                    <h4 style="margin: 0; color: {status_color};">
+                    <h3 style="margin: 0; color: {status_color}; text-align: center;">
                         {status_emoji} Machine {machine['id']}
-                    </h4>
-                    <p style="margin: 5px 0; font-size: 0.9em;">
+                    </h3>
+                    <p style="margin: 5px 0; font-size: 0.9em; text-align: center; color: {status_color};">
                         {machine['name']}
                     </p>
+                    <p style="margin: 0; font-size: 0.8em; text-align: center; font-weight: bold; color: {status_color};">
+                        {status_text}
+                    </p>
                 </div>
+                <style>
+                @keyframes critical-blink {{
+                    0%, 100% {{ opacity: 1; transform: scale(1); }}
+                    50% {{ opacity: 0.7; transform: scale(1.02); }}
+                }}
+                @keyframes attention-pulse {{
+                    0%, 100% {{ opacity: 0.9; }}
+                    50% {{ opacity: 1; }}
+                }}
+                .critical-blink {{
+                    animation: critical-blink 1s infinite;
+                }}
+                .attention-pulse {{
+                    animation: attention-pulse 2s infinite;
+                }}
+                </style>
                 """, unsafe_allow_html=True)
 
-                if st.button(f"Détails Machine {machine['id']}", key=f"btn_{machine['id']}"):
+                if st.button(f"📊 Détails Machine {machine['id']}", key=f"btn_{machine['id']}"):
                     st.session_state.selected_machine_details = machine['id']
                     st.rerun()
 
+    # Résumé temps réel des changements
+    st.subheader("🔄 Activité temps réel")
 
+    # Simulation des changements récents
+    recent_changes = []
+    for machine in machines:
+        if machine["status"] >= 1:  # Si machine en attention ou critique
+            time_change = random.randint(1, 30)
+            if machine["status"] == 2:
+                recent_changes.append(f"🔴 Machine {machine['id']} - Passage en CRITIQUE il y a {time_change}s")
+            else:
+                recent_changes.append(f"🟡 Machine {machine['id']} - Passage en ATTENTION il y a {time_change}s")
+
+    if recent_changes:
+        st.markdown("**Changements récents:**")
+        for change in recent_changes[-3:]:  # Montrer les 3 derniers
+            st.text(change)
+    else:
+        st.success("✅ Aucun changement d'état critique récent")
+
+    # Auto-refresh automatique toutes les 3 secondes (plus fréquent pour Team Leader)
+    if (current_time - st.session_state.last_update).seconds >= 3:
+        st.session_state.last_update = current_time
+        time.sleep(0.1)  # Petit délai pour éviter les conflits
+        st.rerun()
 
 def show_machine_details_fullscreen(machine_id, machines):
     """Affiche les détails d'une machine en plein écran pour le Team Leader"""
@@ -286,13 +435,6 @@ def show_machine_details_fullscreen(machine_id, machines):
     # Section 3: Graphiques en temps réel
     st.subheader("📊 Surveillance en Temps Réel")
 
-    # Auto-refresh pour les graphiques
-    placeholder = st.empty()
-
-    # Génération de données temps réel
-    current_time = datetime.now()
-    times = pd.date_range(end=current_time, periods=60, freq='S')  # 60 dernières secondes
-
     # Initialisation des données dans le state de session si nécessaire
     if 'real_time_data' not in st.session_state:
         st.session_state.real_time_data = {
@@ -305,8 +447,8 @@ def show_machine_details_fullscreen(machine_id, machines):
     # Mise à jour des données en temps réel
     current_time = datetime.now()
     if len(st.session_state.real_time_data['timestamps']) == 0 or \
-       (current_time - st.session_state.real_time_data['timestamps'][-1]).seconds >= 1:
-        
+       (current_time - st.session_state.real_time_data['timestamps'][-1]).seconds >= 2:
+
         # Lecture des capteurs (simulée)
         new_temp, new_vib, new_speed = read_sensor_data(machine["status"])
 
@@ -317,98 +459,99 @@ def show_machine_details_fullscreen(machine_id, machines):
         st.session_state.real_time_data['timestamps'].append(current_time)
 
         # Garder uniquement les 60 dernières secondes
-        if len(st.session_state.real_time_data['timestamps']) > 60:
+        if len(st.session_state.real_time_data['timestamps']) > 30:
             for key in st.session_state.real_time_data:
-                st.session_state.real_time_data[key] = st.session_state.real_time_data[key][-60:]
+                st.session_state.real_time_data[key] = st.session_state.real_time_data[key][-30:]
 
     times = st.session_state.real_time_data['timestamps']
     temp_values = st.session_state.real_time_data['temp_values']
     vib_values = st.session_state.real_time_data['vib_values']
     speed_values = st.session_state.real_time_data['speed_values']
 
-    # Conteneur pour l'actualisation automatique
-    with placeholder.container():
-        # Mise en page des graphiques
-        graph_col1, graph_col2 = st.columns(2)
+    # Mise en page des graphiques
+    graph_col1, graph_col2 = st.columns(2)
 
-        # Création d'un placeholder pour l'heure de mise à jour
-        update_time = st.empty()
-        update_time.text(f"Dernière mise à jour : {datetime.now().strftime('%H:%M:%S')}")
+    # Affichage de l'heure de mise à jour
+    st.text(f"🔄 Dernière mise à jour : {datetime.now().strftime('%H:%M:%S')} | Auto-refresh: ON")
 
-        # Graphique 1: Température
-        with graph_col1:
-            fig_temp = go.Figure()
+    # Graphique 1: Température
+    with graph_col1:
+        fig_temp = go.Figure()
+        if times and temp_values:
             fig_temp.add_trace(go.Scatter(
                 x=times, y=temp_values,
-                mode='lines',
+                mode='lines+markers',
                 name='Température',
-                line=dict(color='#ff6b6b', width=2)
+                line=dict(color='#ff6b6b', width=2),
+                marker=dict(size=4)
             ))
-            fig_temp.add_hline(y=75, line_dash="dash", line_color="#dc3545",
-                              annotation_text="Seuil critique")
-            fig_temp.add_hline(y=65, line_dash="dash", line_color="#ffc107",
-                              annotation_text="Seuil attention")
+        fig_temp.add_hline(y=75, line_dash="dash", line_color="#dc3545",
+                          annotation_text="Seuil critique")
+        fig_temp.add_hline(y=65, line_dash="dash", line_color="#ffc107",
+                          annotation_text="Seuil attention")
 
-            fig_temp.update_layout(
-                title="Température en Temps Réel",
-                xaxis_title="Heure",
-                yaxis_title="Température (°C)",
-                height=300,
-                showlegend=False,
-                hovermode='x unified'
-            )
-            st.plotly_chart(fig_temp, use_container_width=True)
-
-        # Graphique 2: Vibrations
-        with graph_col2:
-            fig_vib = go.Figure()
-            fig_vib.add_trace(go.Scatter(
-                x=times, y=vib_values,
-                mode='lines',
-                name='Vibrations',
-                line=dict(color='#4ecdc4', width=2)
-            ))
-            fig_vib.add_hline(y=5, line_dash="dash", line_color="#dc3545",
-                             annotation_text="Seuil critique")
-            fig_vib.add_hline(y=3.5, line_dash="dash", line_color="#ffc107",
-                             annotation_text="Seuil attention")
-
-            fig_vib.update_layout(
-                title="Vibrations en Temps Réel",
-                xaxis_title="Heure",
-                yaxis_title="Amplitude (mm/s)",
-                height=300,
-                showlegend=False,
-                hovermode='x unified'
-            )
-            st.plotly_chart(fig_vib, use_container_width=True)
-
-        # Graphique 3: Vitesse de rotation (pleine largeur)
-        fig_speed = go.Figure()
-        fig_speed.add_trace(go.Scatter(
-            x=times, y=speed_values,
-            mode='lines',
-            name='Vitesse',
-            line=dict(color='#45b7d1', width=2)
-        ))
-        fig_speed.add_hline(y=1800, line_dash="dash", line_color="#dc3545",
-                         annotation_text="Seuil critique")
-        fig_speed.add_hline(y=1650, line_dash="dash", line_color="#ffc107",
-                         annotation_text="Seuil attention")
-
-        fig_speed.update_layout(
-            title="Vitesse de Rotation en Temps Réel",
+        fig_temp.update_layout(
+            title="Température en Temps Réel",
             xaxis_title="Heure",
-            yaxis_title="Vitesse (RPM)",
-            height=250,
+            yaxis_title="Température (°C)",
+            height=300,
             showlegend=False,
             hovermode='x unified'
         )
-        st.plotly_chart(fig_speed, use_container_width=True)
+        st.plotly_chart(fig_temp, use_container_width=True)
 
-    # Auto-refresh toutes les 2 secondes
-    time.sleep(2)
-    st.rerun()
+    # Graphique 2: Vibrations
+    with graph_col2:
+        fig_vib = go.Figure()
+        if times and vib_values:
+            fig_vib.add_trace(go.Scatter(
+                x=times, y=vib_values,
+                mode='lines+markers',
+                name='Vibrations',
+                line=dict(color='#4ecdc4', width=2),
+                marker=dict(size=4)
+            ))
+        fig_vib.add_hline(y=5, line_dash="dash", line_color="#dc3545",
+                         annotation_text="Seuil critique")
+        fig_vib.add_hline(y=3.5, line_dash="dash", line_color="#ffc107",
+                         annotation_text="Seuil attention")
+
+        fig_vib.update_layout(
+            title="Vibrations en Temps Réel",
+            xaxis_title="Heure",
+            yaxis_title="Amplitude (mm/s)",
+            height=300,
+            showlegend=False,
+            hovermode='x unified'
+        )
+        st.plotly_chart(fig_vib, use_container_width=True)
+
+    # Graphique 3: Vitesse de rotation (pleine largeur)
+    fig_speed = go.Figure()
+    if times and speed_values:
+        fig_speed.add_trace(go.Scatter(
+            x=times, y=speed_values,
+            mode='lines+markers',
+            name='Vitesse',
+            line=dict(color='#45b7d1', width=2),
+            marker=dict(size=4)
+        ))
+    fig_speed.add_hline(y=1800, line_dash="dash", line_color="#dc3545",
+                     annotation_text="Seuil critique")
+    fig_speed.add_hline(y=1650, line_dash="dash", line_color="#ffc107",
+                     annotation_text="Seuil attention")
+
+    fig_speed.update_layout(
+        title="Vitesse de Rotation en Temps Réel",
+        xaxis_title="Heure",
+        yaxis_title="Vitesse (RPM)",
+        height=250,
+        showlegend=False,
+        hovermode='x unified'
+    )
+    st.plotly_chart(fig_speed, use_container_width=True)
+
+    st.divider()
 
     # Section 4: Analyse des Anomalies
     st.subheader("🔍 Analyse des Anomalies")
@@ -437,21 +580,11 @@ def show_machine_details_fullscreen(machine_id, machines):
             failure_hours = random.uniform(2, 8)
             st.error(f"⚠️ **Risque de panne dans {failure_hours:.1f}h**")
             st.error(f"🎯 **Probabilité de défaillance: {machine['confidence_score']*100:.0f}%**")
-            st.markdown("""
-            **Actions recommandées:**
-            1. Arrêt immédiat pour maintenance
-            2. Inspection des roulements
-            3. Vérification du système de refroidissement
-            """)
+
         elif machine["status"] == 1:
             st.warning(f"⚠️ **Dégradation progressive détectée**")
             st.warning(f"🎯 **Probabilité d'anomalie: {machine['confidence_score']*100:.0f}%**")
-            st.markdown("""
-            **Actions recommandées:**
-            1. Planifier une inspection
-            2. Surveillance accrue
-            3. Préparer intervention préventive
-            """)
+
         else:
             st.success("✅ Aucune anomalie détectée")
             next_maintenance = random.randint(15, 30)
@@ -459,7 +592,7 @@ def show_machine_details_fullscreen(machine_id, machines):
 
     st.divider()
 
-    # Section 4: Actions et recommandations
+    # Section 5: Actions et recommandations
     st.subheader("⚡ Actions et Recommandations")
 
     col1, col2 = st.columns(2)
@@ -502,10 +635,12 @@ def show_machine_details_fullscreen(machine_id, machines):
             next_check_days = random.uniform(7, 14)
             st.success(f"📅 **Prochain contrôle dans {next_check_days:.0f} jours**")
 
-    st.divider()
-
-
-
+    # Auto-refresh automatique toutes les 3 secondes
+    current_time = datetime.now()
+    if (current_time - st.session_state.last_update).seconds >= 3:
+        st.session_state.last_update = current_time
+        time.sleep(0.1)  # Petit délai pour éviter les conflits
+        st.rerun()
 def maintenance_technician_interface(machines):
     st.header("🔧 Interface Technicien de Maintenance")
 
@@ -578,7 +713,7 @@ def maintenance_technician_interface(machines):
             if machine["status"] == 2:
                 st.error("🌡️ **Température**: +15°C par rapport à la normale")
                 st.error("📳 **Vibration**: Amplitude 3x supérieure")
-                st.warning("⚡ **Courant**: Pic à 120% de la capacité")
+                st.error("⚡ **Courant**: Pic à 120% de la capacité")
             elif machine["status"] == 1:
                 st.warning("🌡️ **Température**: +8°C par rapport à la normale")
                 st.info("📳 **Vibration**: Légère augmentation détectée")
@@ -656,3 +791,7 @@ def maintenance_technician_interface(machines):
 
 if __name__ == "__main__":
     main()
+
+    # Auto-refresh automatique à la fin - après affichage de tout le contenu
+    time.sleep(3)  # Attendre 3 secondes
+    st.rerun()  # Relancer automatiquement

@@ -21,7 +21,22 @@ st.set_page_config(
 # Configuration API Backend
 API_BASE_URL = os.getenv("BACKEND_URL", "http://backend:8000")
 
-@st.cache_data(ttl=5)  # Cache pendant 5 secondes
+# Configuration refresh intelligent
+REFRESH_INTERVAL = 30  # Secondes entre les refreshs automatiques
+
+def setup_auto_refresh():
+    """Configure un système de refresh automatique intelligent"""
+    if 'last_refresh' not in st.session_state:
+        st.session_state.last_refresh = time.time()
+    
+    current_time = time.time()
+    if current_time - st.session_state.last_refresh > REFRESH_INTERVAL:
+        st.session_state.last_refresh = current_time
+        # Invalider le cache pour forcer une nouvelle récupération des données
+        st.cache_data.clear()
+        st.rerun()
+
+@st.cache_data(ttl=30)  # Cache pendant 30 secondes pour éviter les refreshs trop fréquents
 def get_live_machines_data():
     """Récupère les données des machines depuis l'API backend"""
     try:
@@ -67,23 +82,68 @@ def get_status_emoji(status):
     emojis = {0: "🟢", 1: "🟡", 2: "🔴"}
     return emojis[status]
 
-def simulate_real_time_sensor_data(base_temp, base_pressure, base_velocity, status):
-    """Simule des données temps réel basées sur les valeurs actuelles et le statut"""
-    # Ajouter un peu de bruit pour le temps réel
-    temp = base_temp + np.random.normal(0, 1)
-    pressure = base_pressure + np.random.normal(0, 0.1)
-    velocity = base_velocity + np.random.normal(0, 0.05)
+def display_real_time_metrics(machine_data, key_suffix=""):
+    """Affiche les métriques en temps réel de manière optimisée"""
+    if not machine_data:
+        st.warning("Aucune donnée disponible")
+        return
     
-    # Ajuster selon le statut pour la simulation temps réel
-    if status >= 1:
-        temp += 10 if status == 2 else 5
-        pressure += 2 if status == 2 else 1
-        velocity += 1 if status == 2 else 0.5
+    temp, pressure, velocity = get_real_sensor_data(machine_data)
     
-    return temp, pressure, velocity
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric(
+            label="🌡️ Température", 
+            value=f"{temp:.1f}°C",
+            delta=None,
+            key=f"temp_metric_{key_suffix}"
+        )
+    
+    with col2:
+        st.metric(
+            label="📊 Pression", 
+            value=f"{pressure:.1f} bar",
+            delta=None,
+            key=f"pressure_metric_{key_suffix}"
+        )
+    
+    with col3:
+        st.metric(
+            label="⚡ Vitesse", 
+            value=f"{velocity:.1f} m/s",
+            delta=None,
+            key=f"velocity_metric_{key_suffix}"
+        )
+
+def get_real_sensor_data(machine_data):
+    """Récupère les vraies données capteurs depuis le backend"""
+    if machine_data and 'sensors' in machine_data:
+        sensors = machine_data['sensors']
+        return (
+            sensors.get('temperature', 25.0),
+            sensors.get('pressure', 3.0), 
+            sensors.get('velocity', 1.5)
+        )
+    # Valeurs par défaut si pas de données
+    return 25.0, 3.0, 1.5
+
+@st.cache_data(ttl=10)  # Cache 10s pour éviter les requêtes trop fréquentes
+def get_machine_historical_data(machine_id, hours=24):
+    """Récupère les données historiques d'une machine"""
+    try:
+        response = requests.get(f"{API_BASE_URL}/api/machines/{machine_id}/history?hours={hours}")
+        if response.status_code == 200:
+            return response.json()
+        return []
+    except Exception:
+        return []
 
 # Interface principale
 def main():
+    # Configuration refresh automatique intelligent
+    setup_auto_refresh()
+    
     # En-tête avec titre et logo
     col_title, col_logo = st.columns([4, 1])
 
@@ -411,10 +471,8 @@ def show_machine_details_fullscreen(machine_id, machines):
     if len(session_data['timestamps']) == 0 or \
        (current_time - session_data['timestamps'][-1]).seconds >= 2:
         
-        # Génération de nouvelles données basées sur les vraies valeurs + simulation
-        new_temp, new_pressure, new_velocity = simulate_real_time_sensor_data(
-            machine["temperature"], machine["pressure"], machine["velocity"], machine["status"]
-        )
+        # Récupération des vraies données capteurs depuis le backend
+        new_temp, new_pressure, new_velocity = get_real_sensor_data(machine)
 
         # Mise à jour des données
         session_data['temp_values'].append(new_temp)
@@ -496,9 +554,7 @@ def show_machine_details_fullscreen(machine_id, machines):
         )
         st.plotly_chart(fig_velocity_trend, use_container_width=True, key=f"velocity_trend_{machine_id}")
 
-    # Auto-refresh toutes les 3 secondes
-    time.sleep(3)
-    st.rerun()
+    # Refresh intelligent via session state au lieu d'un reload complet de page
 
 def maintenance_technician_interface(machines):
     """Interface technique détaillée pour les techniciens de maintenance"""
@@ -554,21 +610,27 @@ def maintenance_technician_interface(machines):
         sensor_ranges = [(15, 80), (0.5, 12), (0, 6)]  # Plages réalistes industrielles
         
         for i, (sensor, color, (min_val, max_val)) in enumerate(zip(sensors, sensor_colors, sensor_ranges)):
-            # Génération de données basées sur la valeur actuelle
-            if sensor == 'Température':
-                base_value = machine['temperature']
-            elif sensor == 'Pression':
-                base_value = machine['pressure']  
+            # Récupération des vraies données historiques
+            historical_data = get_machine_historical_data(machine['id'], hours=24)
+            
+            if historical_data and len(historical_data) > 0:
+                # Utiliser les vraies données historiques
+                if sensor == 'Température':
+                    values = [h.get('temperature', machine['temperature']) for h in historical_data]
+                elif sensor == 'Pression':
+                    values = [h.get('pressure', machine['pressure']) for h in historical_data]
+                else:
+                    values = [h.get('velocity', machine['velocity']) for h in historical_data]
+                
+                # Adapter les dates aux vraies données
+                dates = [datetime.fromisoformat(h['timestamp'].replace('Z', '')) for h in historical_data]
+                if len(dates) < len(values):
+                    dates = dates + [dates[-1] + timedelta(minutes=5*i) for i in range(len(values) - len(dates))]
             else:
-                base_value = machine['velocity']
-            
-            # Simulation de variation sur 24h
-            values = np.random.normal(base_value, abs(base_value * 0.1), len(dates))
-            
-            # Ajouter des anomalies si statut problématique
-            if machine["status"] >= 1:
-                anomaly_factor = 1.3 if machine["status"] == 1 else 1.6
-                values = values * anomaly_factor
+                # Fallback: valeur actuelle si pas d'historique
+                current_value = machine.get('temperature' if sensor == 'Température' else 
+                                         'pressure' if sensor == 'Pression' else 'velocity', 25.0)
+                values = [current_value] * len(dates)
 
             fig = go.Figure()
             fig.add_trace(go.Scatter(
